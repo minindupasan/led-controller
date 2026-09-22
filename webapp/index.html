@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>INNOV+IOT SIGN — control</title>
+<style>
+:root{--bg:#000;--fg:#fff;--dim:#8a8a8a;--line:#242424;--panel:#0b0b0b;--hi:#fff;--hi-fg:#000}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;-webkit-font-smoothing:antialiased}
+header{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);
+       position:sticky;top:0;background:var(--bg);z-index:10;flex-wrap:wrap}
+h1{font-size:15px;letter-spacing:.32em;margin:0;font-weight:600}
+.chip{border:1px solid var(--line);padding:3px 9px;font-size:11px;color:var(--dim);letter-spacing:.08em}
+.dot{width:8px;height:8px;border-radius:50%;background:#333;display:inline-block;margin-right:6px}
+.dot.on{background:#fff;box-shadow:0 0 8px #fff}
+nav{display:flex;border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{flex:0 0 auto;background:none;border:none;border-right:1px solid var(--line);color:var(--dim);
+      padding:12px 22px;font:inherit;letter-spacing:.18em;cursor:pointer}
+nav button.active{background:var(--hi);color:var(--hi-fg)}
+nav button:hover:not(.active){color:var(--fg)}
+main{padding:18px;max-width:1080px}
+section{display:none}section.active{display:block}
+.panel{border:1px solid var(--line);background:var(--panel);padding:16px;margin-bottom:16px}
+.panel h2{font-size:11px;letter-spacing:.24em;color:var(--dim);margin:0 0 14px;font-weight:500;text-transform:uppercase}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.grow{flex:1}
+label.lbl{width:104px;color:var(--dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+button,select,input{font:inherit;background:#000;color:var(--fg);border:1px solid var(--line);padding:7px 10px;outline:none}
+button{cursor:pointer;letter-spacing:.1em}
+button:hover{background:#151515}
+button:disabled{opacity:.35;cursor:not-allowed}
+button.primary{background:var(--hi);color:var(--hi-fg);border-color:var(--hi);font-weight:600}
+button.primary:hover{background:#ddd}
+button.sm{padding:4px 8px;font-size:11px}
+input:focus,select:focus{border-color:#666}
+input[type=number]{width:78px}
+input[type=color]{padding:0;width:38px;height:28px;background:none;border:1px solid var(--line)}
+input[type=range]{-webkit-appearance:none;height:2px;background:#333;flex:1;min-width:140px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:#fff;border-radius:50%;cursor:pointer}
+.val{width:44px;text-align:right;color:var(--dim)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+.grid button.on{background:var(--hi);color:var(--hi-fg);border-color:var(--hi)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--dim);font-weight:500;font-size:10px;letter-spacing:.16em;padding:6px;
+   border-bottom:1px solid var(--line);text-transform:uppercase}
+td{padding:5px 6px;border-bottom:1px solid #131313;vertical-align:middle}
+tr.off{opacity:.42}
+td input[type=text]{width:82px}td input[type=number]{width:70px}
+.bar{display:flex;height:34px;border:1px solid var(--line);margin-bottom:12px;overflow:hidden}
+.bar div{display:flex;align-items:center;justify-content:center;font-size:10px;border-right:1px solid #000;
+         color:#000;overflow:hidden;cursor:pointer;letter-spacing:.1em}
+.bar div.gap{background:#111;color:#444}
+#log{height:300px;overflow:auto;background:#000;border:1px solid var(--line);padding:10px;
+     font-size:11px;white-space:pre-wrap;color:#c8c8c8}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+.kv div{border:1px solid var(--line);padding:9px 11px}
+.kv b{display:block;font-size:17px;font-weight:600;margin-top:3px}
+.kv span{font-size:10px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+.issue{border:1px solid #fff;padding:8px 11px;margin-bottom:8px;font-size:12px}
+.hint{color:var(--dim);font-size:11px;margin:6px 0 0;line-height:1.7}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#fff;color:#000;
+       padding:9px 18px;font-size:12px;letter-spacing:.1em;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+.curtain{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;
+         flex-direction:column;gap:18px;z-index:50;text-align:center;padding:24px}
+.curtain h2{letter-spacing:.3em;font-size:14px;margin:0}
+.curtain p{color:var(--dim);max-width:520px;font-size:12px;line-height:1.9}
+hr{border:none;border-top:1px solid var(--line);margin:14px 0}
+</style>
+</head>
+<body>
+
+<div class="curtain" id="curtain">
+  <h1 style="font-size:20px;letter-spacing:.4em">INNOV+IOT</h1>
+  <h2>LED SIGN CONTROL</h2>
+  <p id="curtainMsg">Plug the ESP32 into USB, then connect. The browser asks which
+     serial port to use; pick the one named usbserial / SLAB / CP210x / CH340.</p>
+  <button class="primary" id="btnConnect">CONNECT SERIAL PORT</button>
+  <p class="hint">Needs Chrome, Edge or Opera (Web Serial API). Close any other serial
+     monitor first — only one program can hold the port, and the board stays frozen
+     on its last frame while something else owns it.</p>
+</div>
+
+<header>
+  <h1>INNOV+IOT</h1>
+  <span class="chip"><i class="dot" id="conn"></i><span id="connTxt">offline</span></span>
+  <span class="chip" id="cFps">-- fps</span>
+  <span class="chip" id="cMa">-- mA</span>
+  <span class="chip" id="cHeap">-- kB</span>
+  <span class="chip" id="cLink">--</span>
+  <button id="testBanner" class="sm" style="display:none;background:#fff;color:#000;
+          border-color:#fff;font-weight:600" onclick="send('test off')">
+    TEST OVERLAY ACTIVE — CLICK TO CLEAR</button>
+  <span class="grow"></span>
+  <button class="sm" id="btnSave">SAVE TO FLASH</button>
+  <button class="sm" id="btnDisconnect">DISCONNECT</button>
+</header>
+
+<nav>
+  <button class="active" data-tab="control">CONTROL</button>
+  <button data-tab="segments">SEGMENTS</button>
+  <button data-tab="mapping">MAPPING</button>
+  <button data-tab="debug">DEBUG</button>
+</nav>
+
+<main>
+
+<!-- ============================ CONTROL ============================ -->
+<section id="control" class="active">
+  <div class="panel">
+    <h2>Master</h2>
+    <div class="row">
+      <button id="btnPower" class="primary grow">POWER</button>
+      <button class="sm" onclick="send('test off')">CLEAR TEST</button>
+    </div>
+    <div class="row"><label class="lbl">Brightness</label>
+      <input type="range" id="gBright" min="0" max="255"><span class="val" id="vBright">-</span></div>
+    <div class="row"><label class="lbl">Speed</label>
+      <input type="range" id="gSpeed" min="1" max="255"><span class="val" id="vSpeed">-</span></div>
+    <div class="row"><label class="lbl">Intensity</label>
+      <input type="range" id="gInt" min="0" max="255"><span class="val" id="vInt">-</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Animation</h2>
+    <div class="grid" id="animGrid"></div>
+    <hr>
+    <div class="row">
+      <label class="lbl">Play mode</label>
+      <select id="gMode">
+        <option value="parallel">PARALLEL — all letters together</option>
+        <option value="stagger">STAGGER — phase-shift per letter</option>
+        <option value="sequence">SEQUENCE — one letter at a time</option>
+      </select>
+      <label class="lbl">Stagger ms</label>
+      <input type="number" id="gStagger" min="0" max="5000">
+      <label><input type="checkbox" id="gTint"> rainbow tint</label>
+    </div>
+    <p class="hint">Stagger and sequence follow the letter order in the SEGMENTS tab.</p>
+  </div>
+</section>
+
+<!-- =========================== SEGMENTS ============================ -->
+<section id="segments">
+  <div class="panel">
+    <h2>Layout preview</h2>
+    <div class="bar" id="bar"></div>
+    <p class="hint">Click a block to blink that segment on the real board.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Segment table</h2>
+    <div id="issues"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Name</th><th>Start</th><th>End</th><th>Len</th>
+          <th>Colour</th><th>2nd</th><th>Animation</th><th>Bri</th><th>Sect</th><th>On</th><th>Rev</th><th></th>
+        </tr></thead>
+        <tbody id="segBody"></tbody>
+      </table>
+    </div>
+    <hr>
+    <div class="row">
+      <input type="text" id="nName" placeholder="name" size="8">
+      <input type="number" id="nStart" placeholder="start">
+      <input type="number" id="nEnd" placeholder="end">
+      <button onclick="addSeg()">ADD SEGMENT</button>
+      <button class="sm" onclick="send('seg sort',true)">SORT BY START</button>
+      <button class="sm" onclick="send('seg spread',true)">SPREAD OVER STRIP</button>
+      <span class="grow"></span>
+      <label class="lbl">LED count</label>
+      <input type="number" id="gCount" min="1" max="2000">
+      <button class="sm" onclick="send('ledcount '+gCount.value,true)">APPLY</button>
+    </div>
+    <p class="hint">Ranges are inclusive — I = 20-100 lights LEDs 20 through 100.
+       Changing the LED count re-initialises the strip.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Sub-sections — the logo build-up</h2>
+    <div class="row">
+      <label class="lbl">Segment</label>
+      <select id="dSeg" class="grow"></select>
+      <label class="lbl">Sections</label>
+      <input type="number" id="dCount" min="1" max="16">
+      <button onclick="send('seg div '+dSeg.value+' '+dCount.value,true)">SET &amp; SPLIT EVENLY</button>
+      <button class="sm" onclick="send('seg divauto '+dSeg.value,true)">RE-SPLIT</button>
+    </div>
+    <div class="row">
+      <button class="sm" onclick="send('seg anim '+dSeg.value+' BUILD',true)">ANIMATE: BUILD</button>
+      <button class="sm" onclick="send('seg anim '+dSeg.value+' STEPS',true)">ANIMATE: STEPS</button>
+      <span class="grow"></span>
+      <button class="sm" onclick="send('test off')">STOP PREVIEW</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Section</th><th>Start</th><th>End</th><th>Len</th><th></th></tr></thead>
+        <tbody id="divBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">
+      <b>BUILD</b> lights the sections one after another and keeps them on;
+      <b>STEPS</b> shows one at a time. Both finish on an all-glow step that holds
+      twice as long, then start over — so 10 sections play as 10 pieces + all.<br>
+      Sections are contiguous, so editing one end moves the seam it shares with
+      its neighbour. LIGHT previews a section on the real board.</p>
+  </div>
+</section>
+
+<!-- ============================ MAPPING ============================ -->
+<section id="mapping">
+  <div class="panel">
+    <h2>Step 1 — find the physical LEDs</h2>
+    <div class="row">
+      <button onclick="send('test walk '+wDelay.value)">START WALK</button>
+      <label class="lbl">Step ms</label><input type="number" id="wDelay" value="400">
+      <button onclick="send('test off')">STOP</button>
+      <span class="grow"></span>
+      <button class="sm" onclick="send('test all')">ALL WHITE</button>
+      <span class="hint">Test modes paint over the animation until cleared (or 2 min).</span>
+    </div>
+    <div class="row">
+      <label class="lbl">Single LED</label>
+      <input type="number" id="tIdx" value="0">
+      <button onclick="lightIndex(0)">LIGHT IT</button>
+      <button class="sm" onclick="lightIndex(-1)">&#8592;</button>
+      <button class="sm" onclick="lightIndex(1)">&#8594;</button>
+      <input type="color" id="tCol" value="#ffffff">
+    </div>
+    <div class="row">
+      <label class="lbl">Range</label>
+      <input type="number" id="rA" value="0"><span>to</span><input type="number" id="rB" value="29">
+      <button onclick="send('test range '+rA.value+' '+rB.value+' '+tCol.value)">LIGHT RANGE</button>
+    </div>
+    <p class="hint">Walk mode marches a single LED along the strip with dim markers every 10 LEDs.
+       Note where a letter starts and ends, then assign it below.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Step 2 — assign the range to a letter</h2>
+    <div class="row">
+      <label class="lbl">Segment</label>
+      <select id="mSeg" class="grow"></select>
+      <button class="sm" onclick="grabWalk('start')">USE CURRENT AS START</button>
+      <button class="sm" onclick="grabWalk('end')">USE CURRENT AS END</button>
+    </div>
+    <div class="row">
+      <label class="lbl">Start / End</label>
+      <input type="number" id="mA"><input type="number" id="mB">
+      <button class="primary" onclick="assign()">ASSIGN RANGE</button>
+      <button class="sm" onclick="send('test range '+mA.value+' '+mB.value)">PREVIEW</button>
+      <button class="sm" onclick="send('seg id '+mSeg.value)">BLINK SEGMENT</button>
+    </div>
+    <p class="hint">Live walk index: <b id="walkIdx">-</b> &nbsp;|&nbsp; test mode: <b id="testMode">none</b></p>
+  </div>
+</section>
+
+<!-- ============================= DEBUG ============================= -->
+<section id="debug">
+  <div class="panel">
+    <h2>Telemetry</h2>
+    <div class="kv" id="tele"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Serial console</h2>
+    <div class="row">
+      <input type="text" id="cmdIn" class="grow" placeholder="type a command, e.g.  seg range I 20 100     (h = help)">
+      <button onclick="runCmd()">RUN</button>
+      <button class="sm" onclick="send('h')">HELP</button>
+      <button class="sm" onclick="send('s')">STATUS</button>
+      <button class="sm" onclick="send('l')">LIST</button>
+      <button class="sm" onclick="log.textContent=''">CLEAR</button>
+    </div>
+    <div id="log"></div>
+    <p class="hint">This is the board's own console — every command works here and over
+       a plain USB serial monitor. Up/Down arrows recall history.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Config</h2>
+    <div class="row">
+      <button onclick="send('save')">SAVE</button>
+      <button onclick="send('load',true)">RELOAD</button>
+      <button onclick="exportJson()">EXPORT JSON</button>
+      <button onclick="importJson()">IMPORT JSON</button>
+      <span class="grow"></span>
+      <button onclick="confirm('Restore factory defaults?')&&send('defaults',true)">FACTORY DEFAULTS</button>
+      <button onclick="confirm('Reboot the controller?')&&send('reboot')">REBOOT</button>
+    </div>
+    <div class="row">
+      <label class="lbl">Data pin</label>
+      <select id="gPin"></select>
+      <button class="sm" onclick="setPin()">MOVE STRIP TO THIS GPIO</button>
+      <span class="hint">Applied immediately — no reboot.</span>
+    </div>
+    <div class="row">
+      <label class="lbl">Power budget</label>
+      <input type="number" id="gMa" min="0" max="60000" step="100">
+      <button class="sm" onclick="send('ma '+gMa.value,true)">APPLY mA</button>
+      <span class="hint">Caps total draw by dimming the frame. <b>0 = no cap</b>,
+        so brightness 255 is true full output — size the PSU for it.</span>
+    </div>
+  </div>
+</section>
+
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =======================================================================
+   Web Serial transport — the board speaks plain text lines; replies that
+   start with "#J" are JSON, everything else is human log output.
+   ======================================================================= */
+const $  = id => document.getElementById(id);
+const BAUD = 115200;
+let TX = null;                       // active transport: {kind, send, close}
+let port, writer, reader, keepReading = false;
+let S = {global:{}, segments:[], animations:[], issues:[]};
+let hist = [], histIx = 0, pollTimer = null;
+
+const toast = m => {const t=$('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1600)};
+const appendLog = t => {const l=$('log');l.textContent+=t+'\n';
+  if(l.textContent.length>60000)l.textContent=l.textContent.slice(-40000);l.scrollTop=l.scrollHeight};
+
+/* ----------------------------------------------------------------- serial */
+async function connect(){
+  if(!('serial' in navigator)){
+    $('curtainMsg').textContent='This browser has no Web Serial API. Use Chrome, Edge or Opera on desktop.';
+    return;
+  }
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open({baudRate:BAUD, dataBits:8, stopBits:1, parity:'none', bufferSize:8192});
+  }catch(e){ $('curtainMsg').textContent='Could not open the port: '+e.message; return; }
+
+  writer = port.writable.getWriter();
+  keepReading = true;
+  readLoop();
+
+  TX = {kind:'serial', label:BAUD+' baud',
+        send: line => writer.write(new TextEncoder().encode(line+'\n')),
+        close: disconnect};
+  setOnline(true);
+  appendLog('--- connected @'+BAUD+' baud ---');
+  /* opening the port resets the ESP32; give it time to boot, then sync */
+  setTimeout(async()=>{
+    await send('hello');
+    /* Connecting means taking control: drop any overlay left painting over the
+       animation, otherwise every control below looks dead. */
+    await send('test off');
+    appendLog('--- cleared any stale test overlay ---');
+    await refresh();
+  }, 1600);
+  pollTimer = setInterval(()=>send('stat'), 800);
+}
+
+async function disconnect(){
+  keepReading = false;
+  clearInterval(pollTimer);
+  TX = null;
+  try{ await reader?.cancel(); }catch(e){}
+  try{ writer?.releaseLock(); }catch(e){}
+  try{ await port?.close(); }catch(e){}
+  setOnline(false);
+  appendLog('--- disconnected ---');
+}
+
+function setOnline(on){
+  $('conn').classList.toggle('on',on);
+  $('connTxt').textContent = on ? 'live' : 'offline';
+  $('cLink').textContent = on && TX ? TX.kind.toUpperCase()+' · '+TX.label : '--';
+  $('curtain').style.display = on ? 'none' : 'flex';
+}
+
+async function readLoop(){
+  const dec = new TextDecoder();
+  let buf = '';
+  reader = port.readable.getReader();
+  try{
+    while(keepReading){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value,{stream:true});
+      let nl;
+      while((nl = buf.indexOf('\n')) >= 0){
+        handleLine(buf.slice(0,nl).replace(/\r$/,''));
+        buf = buf.slice(nl+1);
+      }
+    }
+  }catch(e){ appendLog('! read error: '+e.message); }
+  finally{ try{reader.releaseLock()}catch(e){} }
+}
+
+function handleLine(line){
+  const j = line.indexOf('#J');
+  if(j >= 0){
+    try{ return handleJson(JSON.parse(line.slice(j+2))); }catch(e){ /* fall through */ }
+  }
+  if(line.trim() && line.trim() !== 'sign>') appendLog(line.replace(/^sign>\s*/,''));
+}
+
+function handleJson(m){
+  if(m.type === 'status') return status(m);
+  if(m.type === 'state')  { S = m; render(); return; }
+  if(m.type === 'hello')  { appendLog('--- '+m.device+' fw '+m.fw+' ('+m.chip+') ---'); return; }
+  if(m.type === 'ack' && m.out) appendLog(m.out);
+}
+
+/* queue writes so rapid slider moves stay ordered */
+let chain = Promise.resolve();
+function send(cmd, thenRefresh=false){
+  if(!TX){ appendLog('! not connected'); return Promise.resolve(); }
+  chain = chain.then(async()=>{
+    await TX.send(cmd);
+    if(thenRefresh){ await new Promise(r=>setTimeout(r,60)); await TX.send('json'); }
+  }).catch(e=>appendLog('! send error: '+e.message));
+  return chain;
+}
+const refresh = () => send('json');
+
+/* =======================================================================
+   UI
+   ======================================================================= */
+function status(m){
+  $('cFps').textContent = m.fps+' fps';
+  $('cMa').textContent  = m.ma+' mA';
+  $('cHeap').textContent= (m.heap/1024|0)+' kB';
+  $('walkIdx').textContent = m.testIndex;
+  $('testMode').textContent = m.testMode;
+  /* a test overlay repaints the whole strip, so say so loudly - otherwise
+     every other control looks broken */
+  const testing = m.testMode && m.testMode !== 'none';
+  $('testBanner').style.display = testing ? '' : 'none';
+  $('testBanner').textContent = 'TEST OVERLAY ('+m.testMode+') — CLICK TO CLEAR';
+  const fmt = s => `${s/3600|0}h ${(s%3600)/60|0}m ${s%60}s`;
+  $('tele').innerHTML = [
+    ['fps',m.fps],['frames',m.frames],['est. current',m.ma+' mA'],
+    ['free heap',(m.heap/1024|0)+' kB'],['uptime',fmt(m.uptime)],['leds',m.leds],
+    ['segments',m.segments],['power',m.power?'ON':'OFF'],
+    ['data pin',m.pin!==undefined?('GPIO'+m.pin):'-'],
+    ['test mode',m.testMode],['test index',m.testIndex],['unsaved',m.dirty?'YES':'no']
+  ].map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('');
+}
+
+function render(){
+  const g = S.global || {};
+  $('gBright').value=g.brightness; $('vBright').textContent=g.brightness;
+  $('gSpeed').value =g.speed;      $('vSpeed').textContent =g.speed;
+  $('gInt').value   =g.intensity;  $('vInt').textContent   =g.intensity;
+  $('gMode').value  = ['parallel','stagger','sequence'][g.playMode||0];
+  $('gStagger').value=g.stagger; $('gTint').checked=g.rainbowTint;
+  $('gCount').value =g.ledCount; $('gMa').value=g.maxMilliamps;
+  const PINS=[2,4,5,12,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33];
+  const NOTE={2:' (on-board LED)',12:' (strapping)',15:' (strapping)'};
+  $('gPin').innerHTML = PINS.map(p=>
+    `<option value="${p}" ${p===g.dataPin?'selected':''}>GPIO${p}${NOTE[p]||''}</option>`).join('');
+  $('btnPower').textContent = g.power ? 'POWER ON' : 'POWER OFF';
+  $('btnPower').className   = g.power ? 'primary grow' : 'grow';
+
+  $('animGrid').innerHTML = (S.animations||[]).map(a =>
+    `<button class="${a.name===g.animName?'on':''}" onclick="send('anim ${a.name}',true)">${a.name}</button>`).join('');
+
+  const opts = (S.animations||[]).map(a=>`<option value="${a.name}">${a.name}</option>`).join('');
+  $('segBody').innerHTML = (S.segments||[]).map(s=>`
+    <tr class="${s.enabled?'':'off'}">
+      <td>${s.i}</td>
+      <td><input type="text" value="${s.name}" onchange="send('seg name ${s.i} '+this.value,true)"></td>
+      <td><input type="number" value="${s.start}" onchange="send('seg range ${s.i} '+this.value+' ${s.end}',true)"></td>
+      <td><input type="number" value="${s.end}" onchange="send('seg range ${s.i} ${s.start} '+this.value,true)"></td>
+      <td>${s.len}</td>
+      <td><input type="color" value="${s.color}" onchange="send('seg color ${s.i} '+this.value,true)"></td>
+      <td><input type="color" value="${s.color2}" onchange="send('seg color2 ${s.i} '+this.value,true)"></td>
+      <td><select onchange="send('seg anim ${s.i} '+this.value,true)">
+            <option ${s.animName==='INHERIT'?'selected':''}>INHERIT</option>
+            ${opts.replace('value="'+s.animName+'"','value="'+s.animName+'" selected')}
+          </select></td>
+      <td><input type="number" value="${s.brightness}" min="0" max="255" style="width:60px"
+                 onchange="send('seg bright ${s.i} '+this.value,true)"></td>
+      <td><button class="sm" onclick="openSections(${s.i})">${s.divisions>1?s.divisions+' ▦':'—'}</button></td>
+      <td><input type="checkbox" ${s.enabled?'checked':''}
+                 onchange="send('seg '+(this.checked?'on':'off')+' ${s.i}',true)"></td>
+      <td><input type="checkbox" ${s.reversed?'checked':''} onchange="send('seg rev ${s.i}',true)"></td>
+      <td><button class="sm" onclick="send('seg id ${s.i}')">BLINK</button>
+          <button class="sm" onclick="delSeg(${s.i})">DEL</button></td>
+    </tr>`).join('');
+
+  $('issues').innerHTML = (S.issues||[]).map(i=>
+    `<div class="issue">! segment ${i.a}${i.b>=0?' and '+i.b:''} — ${i.what}</div>`).join('');
+
+  /* proportional preview of the whole strip */
+  const n = g.ledCount||1; let html='', cursor=0;
+  [...(S.segments||[])].sort((a,b)=>a.start-b.start).forEach(s=>{
+    if(s.start>cursor) html+=`<div class="gap" style="flex:${s.start-cursor}">&middot;</div>`;
+    html += `<div style="flex:${Math.max(1,s.len)};background:${s.enabled?s.color:'#333'}"
+                  title="${s.name} ${s.start}-${s.end}" onclick="send('seg id ${s.i}')">${s.name}</div>`;
+    cursor = s.end+1;
+  });
+  if(cursor<n) html+=`<div class="gap" style="flex:${n-cursor}">&middot;</div>`;
+  $('bar').innerHTML = html;
+
+  const keep = $('mSeg').value;
+  $('mSeg').innerHTML = (S.segments||[]).map(s=>
+    `<option value="${s.i}">${s.i} — ${s.name}  (${s.start}-${s.end})</option>`).join('');
+  if(keep) $('mSeg').value = keep;
+  syncMapFields();
+  renderDivisions();
+}
+
+function renderDivisions(){
+  const keep = $('dSeg').value;
+  $('dSeg').innerHTML = (S.segments||[]).map(x=>
+    `<option value="${x.i}">${x.i} — ${x.name}  (${x.start}-${x.end})</option>`).join('');
+  if(keep && (S.segments||[])[+keep]) $('dSeg').value = keep;
+
+  const s = (S.segments||[])[+$('dSeg').value];
+  if(!s){ $('divBody').innerHTML=''; return; }
+  $('dCount').value = s.divisions;
+  $('divBody').innerHTML = (s.div||[]).map(d=>`
+    <tr>
+      <td>${d.k}${d.k===0?' (first)':''}</td>
+      <td><input type="number" value="${d.start}"
+           onchange="send('seg divrange ${s.i} ${d.k} '+this.value+' ${d.end}',true)"></td>
+      <td><input type="number" value="${d.end}"
+           onchange="send('seg divrange ${s.i} ${d.k} ${d.start} '+this.value,true)"></td>
+      <td>${d.len}</td>
+      <td><button class="sm" onclick="send('test div ${s.i} ${d.k}')">LIGHT</button></td>
+    </tr>`).join('') +
+    `<tr><td colspan="5" style="color:#8a8a8a">final step — all ${s.divisions} sections glow together</td></tr>`;
+}
+
+function openSections(i){
+  document.querySelector('nav button[data-tab="segments"]').click();
+  $('dSeg').value = i;
+  renderDivisions();
+  $('dSeg').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function syncMapFields(){
+  const s = (S.segments||[])[+$('mSeg').value];
+  if(s){ $('mA').value=s.start; $('mB').value=s.end; }
+}
+
+/* ---- actions ---- */
+$('btnConnect').onclick    = connect;
+$('btnDisconnect').onclick = disconnect;
+$('btnSave').onclick       = () => send('save').then(()=>toast('saved to flash'));
+$('btnPower').onclick      = () => send(S.global.power?'off':'on', true);
+$('mSeg').onchange         = syncMapFields;
+$('dSeg').onchange         = renderDivisions;
+
+/* sliders: throttle to ~20 writes/s, refresh once the user lets go */
+[['gBright','bright','vBright'],['gSpeed','speed','vSpeed'],['gInt','intensity','vInt']]
+.forEach(([id,cmd,out])=>{
+  let last = 0;
+  $(id).addEventListener('input', e=>{
+    $(out).textContent = e.target.value;
+    const now = Date.now();
+    if(now-last > 50){ last = now; send(cmd+' '+e.target.value); }
+  });
+  $(id).addEventListener('change', e=>send(cmd+' '+e.target.value, true));
+});
+$('gMode').onchange    = e => send('mode '+e.target.value, true);
+$('gStagger').onchange = e => send('stagger '+e.target.value, true);
+$('gTint').onchange    = e => send('tint '+(e.target.checked?'on':'off'), true);
+
+function lightIndex(delta){
+  const v = Math.max(0, (+$('tIdx').value||0) + delta);
+  $('tIdx').value = v;
+  send('test index '+v+' '+$('tCol').value);
+}
+function grabWalk(which){
+  const v = parseInt($('walkIdx').textContent) || 0;
+  $(which==='start'?'mA':'mB').value = v;
+}
+function assign(){
+  send(`seg range ${$('mSeg').value} ${$('mA').value} ${$('mB').value}`, true);
+  toast('range assigned');
+}
+function addSeg(){
+  send(`seg add ${$('nName').value||'SEG'} ${+$('nStart').value||0} ${+$('nEnd').value||0}`, true);
+}
+function delSeg(i){ if(confirm('Delete segment '+i+'?')) send('seg del '+i, true); }
+
+function exportJson(){
+  const blob = new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sign-config.json';
+  a.click();
+  toast('config downloaded');
+}
+
+/* import replays the config as console commands, so no extra firmware path */
+async function importJson(){
+  const txt = prompt('Paste an exported config JSON:');
+  if(!txt) return;
+  let cfg; try{ cfg = JSON.parse(txt); }catch(e){ return toast('invalid JSON'); }
+  const g = cfg.global||{};
+  for(const s of [...(S.segments||[])].map(s=>s.i).reverse()) await send('seg del '+s);
+  for(const s of (cfg.segments||[])){
+    await send(`seg add ${s.name} ${s.start} ${s.end}`);
+    const i = (cfg.segments.indexOf(s));
+    await send(`seg color ${i} ${s.color}`);
+    await send(`seg color2 ${i} ${s.color2}`);
+    await send(`seg anim ${i} ${s.animName}`);
+    await send(`seg bright ${i} ${s.brightness}`);
+    if(!s.enabled) await send('seg off '+i);
+    if(s.reversed) await send('seg rev '+i);
+  }
+  if(g.ledCount) await send('ledcount '+g.ledCount);
+  if(g.animName) await send('anim '+g.animName);
+  ['brightness:bright','speed:speed','intensity:intensity','stagger:stagger']
+    .forEach(p=>{const [k,c]=p.split(':'); if(g[k]!==undefined) send(c+' '+g[k]);});
+  await send('json');
+  toast('imported — press SAVE to keep it');
+}
+
+/* ---- console input with history ---- */
+function runCmd(){
+  const v = $('cmdIn').value.trim();
+  if(!v) return;
+  appendLog('> '+v);
+  hist.push(v); histIx = hist.length;
+  send(v, /^(seg|anim|mode|ledcount|defaults|load)/.test(v));
+  $('cmdIn').value = '';
+}
+$('cmdIn').addEventListener('keydown', e=>{
+  if(e.key==='Enter') runCmd();
+  else if(e.key==='ArrowUp'   && histIx>0)            $('cmdIn').value = hist[--histIx]||'';
+  else if(e.key==='ArrowDown' && histIx<hist.length-1) $('cmdIn').value = hist[++histIx]||'';
+});
+
+/* ---- tabs ---- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('section').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); $(b.dataset.tab).classList.add('active');
+});
+
+/* reconnect automatically if the board is unplugged and plugged back in */
+if('serial' in navigator){
+  navigator.serial.addEventListener('disconnect', ()=>{ if(keepReading) disconnect(); });
+}
+setOnline(false);
+</script>
+</body></html>

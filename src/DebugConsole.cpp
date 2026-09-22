@@ -3,7 +3,7 @@
 #include "SegmentManager.h"
 #include "LedController.h"
 #include "Logger.h"
-#include <WiFi.h>
+#include <ArduinoJson.h>
 
 DebugConsole Console;
 
@@ -21,26 +21,26 @@ static String tok(const String &s, int n, char sep = ' ') {
     return "";
 }
 
-static CRGB parseColor(const String &s, CRGB fallback = CRGB::White) {
+static RGB parseColor(const String &s, RGB fallback = RGB_WHITE) {
     String v = s;
     v.trim();
     v.replace("#", "");
     if (v.length() == 6) {
         uint32_t rgb = strtoul(v.c_str(), nullptr, 16);
-        return CRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        return RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
     }
     if (v.indexOf(',') > 0)
-        return CRGB(tok(v, 0, ',').toInt(), tok(v, 1, ',').toInt(), tok(v, 2, ',').toInt());
+        return RGB(tok(v, 0, ',').toInt(), tok(v, 1, ',').toInt(), tok(v, 2, ',').toInt());
     v.toUpperCase();
-    if (v == "RED")   return CRGB::Red;
-    if (v == "GREEN") return CRGB::Green;
-    if (v == "BLUE")  return CRGB::Blue;
-    if (v == "WHITE") return CRGB::White;
-    if (v == "OFF")   return CRGB::Black;
+    if (v == "RED")   return RGB(255,0,0);
+    if (v == "GREEN") return RGB(0,255,0);
+    if (v == "BLUE")  return RGB(0,0,255);
+    if (v == "WHITE") return RGB_WHITE;
+    if (v == "OFF")   return RGB_BLACK;
     return fallback;
 }
 
-static String hex(const CRGB &c) {
+static String hex(const RGB &c) {
     char b[8];
     snprintf(b, sizeof(b), "#%02X%02X%02X", c.r, c.g, c.b);
     return String(b);
@@ -52,24 +52,30 @@ void DebugConsole::begin() {
 }
 
 void DebugConsole::printMenu() {
-    Serial.println();
-    Serial.println(F("=========== INNOV+IOT SIGN - DEBUG CONSOLE ==========="));
-    Serial.println(F(" STATE     s) status      l) list segments   v) validate"));
-    Serial.println(F(" POWER     on | off       bright <0-255>     speed <1-255>"));
-    Serial.println(F(" LOOK      anim <name|id> intensity <0-255>  tint on|off"));
-    Serial.println(F("           mode <parallel|stagger|sequence>  stagger <ms>"));
-    Serial.println(F(" SEGMENTS  seg add <name> <start> <end>"));
-    Serial.println(F("           seg range <i|name> <start> <end>"));
-    Serial.println(F("           seg color <i|name> <#RRGGBB|red|r,g,b>"));
-    Serial.println(F("           seg anim  <i|name> <name|id|inherit>"));
-    Serial.println(F("           seg on|off|rev|del|id <i|name>"));
-    Serial.println(F("           seg bright <i|name> <0-255>       seg sort"));
-    Serial.println(F(" MAPPING   test index <n>      test range <a> <b>"));
-    Serial.println(F("           test walk [ms]      test all        test off"));
-    Serial.println(F(" CONFIG    save | load | defaults | ledcount <n> | ma <n>"));
-    Serial.println(F(" NET       wifi            wifi set <ssid> <pass>   wifi ap"));
-    Serial.println(F(" SYSTEM    h) help   m) menu   clear   reboot"));
-    Serial.println(F("======================================================"));
+    Print *o = _out;
+    o->println();
+    o->println(F("=========== INNOV+IOT SIGN - DEBUG CONSOLE ==========="));
+    o->println(F(" STATE     s) status      l) list segments   v) validate"));
+    o->println(F(" POWER     on | off       bright <0-255>     speed <1-255>"));
+    o->println(F(" LOOK      anim <name|id> intensity <0-255>  tint on|off"));
+    o->println(F("           mode <parallel|stagger|sequence>  stagger <ms>"));
+    o->println(F(" SEGMENTS  seg add <name> <start> <end>"));
+    o->println(F("           seg range <i|name> <start> <end>"));
+    o->println(F("           seg color <i|name> <#RRGGBB|red|r,g,b>"));
+    o->println(F("           seg anim  <i|name> <name|id|inherit>"));
+    o->println(F("           seg on|off|rev|del|id <i|name>"));
+    o->println(F("           seg bright <i|name> <0-255>       seg sort"));
+    o->println(F("           seg spread     divide the whole strip between letters"));
+    o->println(F(" SECTIONS  seg div <i|name> <count>          seg divlist <i|name>"));
+    o->println(F("           seg divrange <i|name> <k> <start> <end>   seg divauto <i|name>"));
+    o->println(F(" MAPPING   test index <n>      test range <a> <b>"));
+    o->println(F("           test walk [ms]      test all        test off"));
+    o->println(F(" CONFIG    save | load | defaults | ledcount <n> | ma <n>"));
+    o->println(F("           pin            show wiring / list usable GPIOs"));
+    o->println(F("           pin <gpio>     move the strip's data line (live)"));
+    o->println(F(" PROTOCOL  json (full state)   stat (telemetry)   hello"));
+    o->println(F(" SYSTEM    h) help   m) menu   clear   reboot"));
+    o->println(F("======================================================"));
 }
 
 /* --------------------------------------------------------------------- loop */
@@ -118,7 +124,14 @@ String DebugConsole::execute(const String &cmdline) {
     if (cmd == "speed")     { g.speed = constrain(rest.toInt(), 1, 255);      Segments.markDirty(); return "speed=" + String(g.speed); }
     if (cmd == "intensity") { g.intensity = constrain(rest.toInt(), 0, 255);  Segments.markDirty(); return "intensity=" + String(g.intensity); }
     if (cmd == "stagger")   { g.stagger = constrain(rest.toInt(), 0, 5000);   Segments.markDirty(); return "stagger=" + String(g.stagger) + "ms"; }
-    if (cmd == "ma")        { g.maxMilliamps = constrain(rest.toInt(), 100, 60000); Leds.restartStrip(); Segments.markDirty(); return "power budget=" + String(g.maxMilliamps) + "mA"; }
+    if (cmd == "ma") {
+        long v = rest.toInt();
+        g.maxMilliamps = (v <= 0) ? 0 : (uint16_t)constrain(v, 100L, 60000L);
+        Segments.markDirty();
+        return g.maxMilliamps ? ("power budget=" + String(g.maxMilliamps) + "mA")
+                              : String("power cap OFF - brightness is not limited "
+                                       "(size the PSU for it)");
+    }
 
     if (cmd == "tint") { g.rainbowTint = rest.startsWith("on"); Segments.markDirty(); return String("tint ") + (g.rainbowTint ? "on" : "off"); }
 
@@ -144,9 +157,14 @@ String DebugConsole::execute(const String &cmdline) {
         return "ledCount=" + String(g.ledCount);
     }
 
+    if (cmd == "json" || cmd == "state") { emitState();  return ""; }
+    if (cmd == "stat")                   { emitStatus(); return ""; }
+    if (cmd == "hello" || cmd == "id")   { emitHello();  return ""; }
+
+    if (cmd == "pin")   return cmdPin(rest);
+
     if (cmd == "seg")   return cmdSeg(rest);
     if (cmd == "test")  return cmdTest(rest);
-    if (cmd == "wifi")  return cmdWifi(rest);
 
     if (cmd == "save")     return Segments.save() ? "config saved" : "SAVE FAILED";
     if (cmd == "load")     return Segments.load() ? "config loaded" : "nothing stored";
@@ -183,6 +201,13 @@ String DebugConsole::cmdSeg(const String &args) {
 
     if (verb == "sort") { Segments.sortByStart(); return "segments sorted by start index"; }
 
+    if (verb == "spread") {
+        Segments.spreadEvenly();
+        GlobalSettings &g = Segments.globals();
+        return "segments spread evenly across " + String(g.ledCount) + " LEDs (" +
+               String(g.ledCount / max<uint8_t>(Segments.count(), 1)) + " each) - `l` to list";
+    }
+
     if (verb == "add") {
         String name = tok(args, 1);
         int a = tok(args, 2).toInt(), b = tok(args, 3).toInt();
@@ -195,6 +220,38 @@ String DebugConsole::cmdSeg(const String &args) {
     Segment *s = Segments.get(idx);
     if (!s) return "usage: seg <verb> <index|name> ...   (`l` to list)";
 
+    if (verb == "div") {
+        uint8_t n = tok(args, 2).toInt();
+        Segments.setDivisions(idx, n);
+        return String(s->name) + " split into " + String(divisionCount(*s)) +
+               " sections (+ all-glow step)";
+    }
+    if (verb == "divauto") {
+        Segments.autoSplit(idx);
+        return String(s->name) + " sections re-split evenly";
+    }
+    if (verb == "divrange") {
+        uint8_t k = tok(args, 2).toInt();
+        uint16_t a = tok(args, 3).toInt(), b = tok(args, 4).toInt();
+        if (!Segments.setDivisionRange(idx, k, a, b))
+            return "usage: seg divrange <i|name> <k> <start> <end>";
+        uint16_t ra, rb;
+        divisionBounds(*s, k, ra, rb);
+        return String(s->name) + " section " + String(k) + " -> " +
+               String(ra) + "-" + String(rb);
+    }
+    if (verb == "divlist") {
+        uint8_t n = divisionCount(*s);
+        String o = String(s->name) + ": " + String(n) + " sections" +
+                   (s->customDiv ? " (custom)" : " (even split)") + " + all-glow";
+        for (uint8_t k = 0; k < n; k++) {
+            uint16_t a, b;
+            if (!divisionBounds(*s, k, a, b)) continue;
+            o += "\n   [" + String(k) + "] " + String(a) + "-" + String(b) +
+                 "  (" + String(b - a + 1) + " leds)";
+        }
+        return o;
+    }
     if (verb == "range") {
         uint16_t a = tok(args, 2).toInt(), b = tok(args, 3).toInt();
         Segments.setRange(idx, a, b);
@@ -202,7 +259,7 @@ String DebugConsole::cmdSeg(const String &args) {
                " (" + String(s->length()) + " leds)";
     }
     if (verb == "color")  { s->color  = parseColor(tok(args, 2)); Segments.markDirty(); return String(s->name) + " color " + hex(s->color); }
-    if (verb == "color2") { s->color2 = parseColor(tok(args, 2), CRGB::Black); Segments.markDirty(); return String(s->name) + " color2 " + hex(s->color2); }
+    if (verb == "color2") { s->color2 = parseColor(tok(args, 2), RGB_BLACK); Segments.markDirty(); return String(s->name) + " color2 " + hex(s->color2); }
     if (verb == "anim")   { s->animation = animationIdFromName(tok(args, 2)); Segments.markDirty(); return String(s->name) + " anim " + animationName(s->animation); }
     if (verb == "bright") { s->brightness = constrain(tok(args, 2).toInt(), 0, 255); Segments.markDirty(); return String(s->name) + " bright " + String(s->brightness); }
     if (verb == "on")     { s->enabled = true;  Segments.markDirty(); return String(s->name) + " enabled"; }
@@ -212,7 +269,8 @@ String DebugConsole::cmdSeg(const String &args) {
     if (verb == "del")    { String n = s->name; Segments.remove(idx); return "removed " + n; }
     if (verb == "name")   { String n = tok(args, 2); ::strncpy(s->name, n.c_str(), SEG_NAME_LEN - 1); s->name[SEG_NAME_LEN - 1] = 0; Segments.markDirty(); return "renamed to " + n; }
 
-    return "seg verbs: add range color color2 anim bright on off rev id del name sort";
+    return "seg verbs: add range color color2 anim bright on off rev id del name sort spread\n"
+           "           div divrange divauto divlist";
 }
 
 String DebugConsole::cmdTest(const String &args) {
@@ -226,36 +284,53 @@ String DebugConsole::cmdTest(const String &args) {
         Leds.testRange(a, b, parseColor(tok(args, 3)));
         return "range " + String(a) + "-" + String(b) + " lit (" + String(b - a + 1) + " leds)";
     }
+    if (verb == "div") {
+        int i = resolveSeg(tok(args, 1));
+        const Segment *sg = Segments.get(i);
+        if (!sg) return "usage: test div <i|name> <k>";
+        uint8_t k = tok(args, 2).toInt();
+        uint16_t a, b;
+        if (!divisionBounds(*sg, k, a, b)) return "no such section";
+        Leds.testRange(a, b, parseColor(tok(args, 3)));
+        return String(sg->name) + " section " + String(k) + ": " + String(a) + "-" + String(b);
+    }
     if (verb == "all")  { Leds.testAll(parseColor(tok(args, 1))); return "all LEDs lit"; }
     if (verb == "walk") {
         uint16_t d = tok(args, 1).length() ? tok(args, 1).toInt() : 400;
         Leds.testWalk(d);
         return "walking one LED every " + String(d) + "ms (markers every 10) - `test off` to stop";
     }
-    return "test verbs: index <n> | range <a> <b> | walk [ms] | all | off";
+    return "test verbs: index <n> | range <a> <b> | div <seg> <k> | walk [ms] | all | off";
 }
 
-String DebugConsole::cmdWifi(const String &args) {
-    String verb = tok(args, 0);
-    verb.toLowerCase();
-    WifiSettings &w = Segments.config().wifi;
+String DebugConsole::cmdPin(const String &args) {
+    GlobalSettings &g = Segments.globals();
 
-    if (verb == "set") {
-        String ssid = tok(args, 1), pass = tok(args, 2);
-        ::strncpy(w.ssid, ssid.c_str(), sizeof(w.ssid) - 1);
-        ::strncpy(w.pass, pass.c_str(), sizeof(w.pass) - 1);
-        w.useSta = true;
-        Segments.save();
-        return "wifi saved: " + ssid + " (reboot to join)";
+    if (!args.length()) {
+        String o = "\n--- LED DATA PIN ---------------------------------";
+        o += "\n driving now : GPIO" + String(Leds.activePin());
+        o += "\n configured  : GPIO" + String(g.dataPin);
+
+        o += "\n usable      : 2 4 5 12 13 14 15 16 17 18 19 21 22 23 25 26 27 32 33";
+        o += "\n avoid       : 1/3 (this console), 6-11 (flash), 34-39 (input only)";
+        o += "\n\n set it with:  pin <gpio>     e.g.  pin 5";
+        o += "\n--------------------------------------------------";
+        return o;
     }
-    if (verb == "ap") { w.useSta = false; Segments.save(); return "AP mode on next boot"; }
 
-    String out = "mode: " + String(WiFi.getMode() == WIFI_AP ? "AP" : "STA");
-    out += "\n  ip:    " + (WiFi.getMode() == WIFI_AP ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
-    out += "\n  ssid:  " + String(WiFi.getMode() == WIFI_AP ? AP_SSID : WiFi.SSID().c_str());
-    out += "\n  mdns:  http://" MDNS_HOST ".local";
-    out += "\n  rssi:  " + String(WiFi.RSSI());
-    return out;
+    int p = args.toInt();
+    if (!isValidLedPin(p))
+        return "GPIO" + String(p) + " can't drive the strip. Usable: "
+               "2 4 5 12 13 14 15 16 17 18 19 21 22 23 25 26 27 32 33";
+
+    g.dataPin = (uint8_t)p;
+    Segments.save();
+    Leds.restartStrip();            // NeoPixelBus rebuilds live - no reboot
+
+    String o = "data pin now GPIO" + String(p) + " (saved, applied immediately)";
+    const char *warn = ledPinWarning(p);
+    if (warn) o += "\n  ! " + String(warn);
+    return o;
 }
 
 /* ------------------------------------------------------------------ reports */
@@ -269,10 +344,11 @@ String DebugConsole::cmdStatus() {
     o += "\n playMode     : " + String(g.playMode == PLAY_PARALLEL ? "parallel" :
                                        g.playMode == PLAY_STAGGER  ? "stagger"  : "sequence");
     o += "  stagger: " + String(g.stagger) + "ms";
-    o += "\n leds         : " + String(g.ledCount) + " on GPIO" + String(LED_DATA_PIN);
+    o += "\n leds         : " + String(g.ledCount) + " on GPIO" + String(Leds.activePin());
     o += "\n segments     : " + String(Segments.count()) + "/" + String(MAX_SEGMENTS);
     o += "\n fps          : " + String(Leds.fps(), 1) + "   frames: " + String(Leds.frames());
-    o += "\n est. current : ~" + String(Leds.estimatedMilliamps()) + " mA (budget " + String(g.maxMilliamps) + ")";
+    o += "\n est. current : ~" + String(Leds.estimatedMilliamps()) + " mA (budget " +
+         (g.maxMilliamps ? String(g.maxMilliamps) : String("off")) + ")";
     o += "\n test overlay : " + String(Leds.test().mode == TEST_NONE ? "none" : "ACTIVE");
     o += "\n free heap    : " + String(ESP.getFreeHeap()) + " B";
     o += "\n uptime       : " + String(millis() / 1000) + " s";
@@ -297,4 +373,61 @@ String DebugConsole::cmdList() {
     }
     o += "\n ---------------------------------------------------------------------";
     return o;
+}
+
+/* ----------------------------------------------------------------- protocol */
+static void emitLine(JsonDocument &d) {
+    Print *o = Console.out();
+    o->print(F("#J"));
+    serializeJson(d, *o);
+    o->println();
+}
+
+void DebugConsole::emitHello() {
+    JsonDocument d;
+    d["type"]     = "hello";
+    d["device"]   = "INNOV+IOT SIGN";
+    d["fw"]       = "1.0.0";
+    d["protocol"] = 1;
+    d["chip"]     = ESP.getChipModel();
+    d["maxLeds"]  = MAX_LEDS;
+    d["maxSegs"]  = MAX_SEGMENTS;
+    emitLine(d);
+}
+
+void DebugConsole::emitState() {
+    JsonDocument d;
+    JsonObject root = d.to<JsonObject>();
+    root["type"] = "state";
+    Segments.toJson(root);
+    emitLine(d);
+}
+
+void DebugConsole::emitStatus() {
+    static const char *TEST_NAMES[] = {"none", "index", "range", "all", "identify", "walk"};
+    const TestState &t = Leds.test();
+
+    JsonDocument d;
+    d["type"]      = "status";
+    d["fps"]       = (int)(Leds.fps() + 0.5f);
+    d["frames"]    = Leds.frames();
+    d["ma"]        = Leds.estimatedMilliamps();
+    d["heap"]      = ESP.getFreeHeap();
+    d["uptime"]    = millis() / 1000;
+    d["leds"]      = Segments.globals().ledCount;
+    d["pin"]       = Leds.activePin();
+    d["segments"]  = Segments.count();
+    d["power"]     = Segments.globals().power;
+    d["testMode"]  = TEST_NAMES[t.mode <= TEST_WALK ? t.mode : 0];
+    d["testIndex"] = t.index;
+    d["dirty"]     = Segments.dirty();
+    emitLine(d);
+}
+
+void DebugConsole::emitAck(const String &cmd, const String &out) {
+    JsonDocument d;
+    d["type"] = "ack";
+    d["cmd"]  = cmd;
+    d["out"]  = out;
+    emitLine(d);
 }

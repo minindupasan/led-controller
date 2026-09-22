@@ -26,6 +26,13 @@ public:
     bool remove(int i);
     bool setRange(int i, uint16_t start, uint16_t end);
     void sortByStart();
+    bool spreadEvenly();               // divide ledCount evenly between segments
+
+    /* sub-sections (logo pieces) */
+    bool setDivisions(int i, uint8_t n);                       // even split
+    bool setDivisionRange(int i, uint8_t k, uint16_t a, uint16_t b);
+    bool autoSplit(int i);                                     // back to even
+    void divisionsToJson(int i, JsonArray arr) const;
 
     /* Validation: reports overlaps / out-of-range / inverted ranges. */
     struct Issue { int segA; int segB; const char *what; };

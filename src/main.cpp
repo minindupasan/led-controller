@@ -1,18 +1,20 @@
 /*
  * ============================================================================
  *  INNOV+IOT LED SIGN CONTROLLER
- *  ESP32 + WS2812B  -  per-letter segments, animation engine,
- *  serial debug console and a black & white web UI.
+ *  ESP32 + WS2812B  -  per-letter segments, animation engine, debug console.
  *
- *  Boot:  tries stored Wi-Fi credentials, otherwise starts the AP
- *         SSID "INNOV-IOT-SIGN" / pass "innoviot123"  ->  http://192.168.4.1
- *         (also reachable at http://ledsign.local)
+ *  Control surface: a line-based text protocol on USB serial @115200.
+ *    - humans  : type commands in any serial monitor (`h` for the menu)
+ *    - the UI  : webapp/index.html speaks the same protocol over Web Serial
+ *
+ *  (A Wi-Fi transport for the same protocol is parked in extras/wifi/.)
+ *
+ *  Machine-readable replies are single lines prefixed with "#J" followed by
+ *  JSON; everything else is plain text meant for a human.
  * ============================================================================
  */
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <ESPmDNS.h>
 
 #include "Config.h"
 #include "Logger.h"
@@ -20,42 +22,9 @@
 #include "LedController.h"
 #include "AnimationEngine.h"
 #include "DebugConsole.h"
-#include "WebInterface.h"
 
 static uint32_t lastHeartbeat = 0;
 static uint32_t lastAutosave  = 0;
-
-static void startNetwork() {
-    WifiSettings &w = Segments.config().wifi;
-
-    if (w.useSta && strlen(w.ssid)) {
-        WiFi.mode(WIFI_STA);
-        WiFi.setSleep(false);
-        WiFi.begin(w.ssid, w.pass);
-        Log.log("[net] joining \"%s\" ...", w.ssid);
-        uint32_t t0 = millis();
-        while (WiFi.status() != WL_CONNECTED && millis() - t0 < STA_CONNECT_TIMEOUT) {
-            delay(250);
-        }
-        if (WiFi.status() == WL_CONNECTED) {
-            Log.log("[net] connected, ip %s", WiFi.localIP().toString().c_str());
-        } else {
-            Log.log("[net] join failed - falling back to AP");
-            w.useSta = false;
-        }
-    }
-
-    if (!w.useSta || WiFi.status() != WL_CONNECTED) {
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP(AP_SSID, AP_PASSWORD);
-        Log.log("[net] AP \"%s\", ip %s", AP_SSID, WiFi.softAPIP().toString().c_str());
-    }
-
-    if (MDNS.begin(MDNS_HOST)) {
-        MDNS.addService("http", "tcp", 80);
-        Log.log("[net] mdns: http://%s.local", MDNS_HOST);
-    }
-}
 
 void setup() {
     Log.begin(115200);
@@ -66,19 +35,17 @@ void setup() {
             ESP.getChipModel(), ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / (1024 * 1024));
 
     Segments.begin();          // NVS config (or defaults)
-    Leds.begin();              // FastLED + animation state
-    startNetwork();
-    Web.begin();               // HTTP + websocket
-    Console.begin();           // serial menu
+    Leds.begin();              // output driver + animation state
+    Console.begin();           // serial menu + protocol
 
     Log.log("[sys] ready: %u segments, %u leds", Segments.count(), Segments.globals().ledCount);
+    Console.emitHello();       // lets the web UI detect the board
     Serial.print(F("sign> "));
 }
 
 void loop() {
     Leds.loop();               // render + show
     Console.loop();            // serial commands
-    Web.loop();                // websocket housekeeping
 
     uint32_t now = millis();
 

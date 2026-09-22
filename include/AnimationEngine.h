@@ -16,6 +16,12 @@ struct RenderCtx {
     bool     useTint;
     uint16_t segIndex;     // segment ordinal, for per-segment variation
     uint16_t absStart;     // strip index of local pixel 0 (for stateful FX)
+
+    /* The enabled segments laid end to end, so an animation can sweep the
+       whole sign as one continuous run rather than per letter. */
+    uint16_t chainOffset;  // pixels before this segment in that chain
+    uint16_t chainTotal;   // total lit pixels across every enabled segment
+    uint16_t chainMaxLen;  // longest single segment, for phase timing
 };
 
 class AnimationEngine {
@@ -23,7 +29,7 @@ public:
     static void begin();
     /* Render one animation into `out[0..len-1]`. */
     static void render(uint8_t anim, const Segment &seg, const RenderCtx &ctx,
-                       CRGB *out, uint16_t len);
+                       RGB *out, uint16_t len);
     /* Scratch state (fire heat, sparkle decay) is keyed on strip index. */
     static void resetState();
 };
