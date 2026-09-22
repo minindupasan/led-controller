@@ -4,7 +4,8 @@
  * The board drives the INNOV IOT letters only: 591 LEDs, contiguous.
  * The oil-lamp logo lives on a separate ESP32.
  *
- * Geometry belongs to letters; colour and animation belong to words.
+ * Letters carry geometry, words carry colour, the animation is global -
+ * both words always run the same one.
  */
 #pragma once
 
@@ -25,13 +26,19 @@
 #define NAME_LEN            8
 #define TARGET_FPS          60      // upper bound; the wire decides the rest
 #define LED_US_PER_PIXEL    30
-#define CONFIG_VERSION      8
+#define CONFIG_VERSION      9
 
 /* ----------------------------------------------------------------- palette */
 /* Purple / cyan / amber. Gradients stay inside a base hue - see tintOf(). */
 #define COL_PURPLE          0x7B2FF7
 #define COL_CYAN            0x00E5FF
 #define COL_AMBER           0xFFB020
+
+/* ----------------------------------------------------------------- network */
+#define AP_SSID             "INNOV-IOT-SIGN"
+#define AP_PASSWORD         "innoviot123"   // >= 8 characters
+#define MDNS_HOST           "innoviot"      // http://innoviot.local
+#define WS_STATUS_MS        500             // telemetry push interval
 
 /* -------------------------------------------------------------- animations */
 enum AnimationId : uint8_t {
@@ -41,6 +48,7 @@ enum AnimationId : uint8_t {
     ANIM_TRAVERSE,      // band sweeps the word, letter to letter, no gaps
     ANIM_AURORA,        // layered waves, hue drifting near the base colour
     ANIM_COMET,         // bright head with a decaying tail
+    ANIM_BOUNCE,        // traverse out, then sweep back the other way
     ANIM_COUNT
 };
 
@@ -55,17 +63,17 @@ struct Letter {                     // geometry only
     uint16_t length() const { return (end >= start) ? (end - start + 1) : 0; }
 };
 
-struct Word {                       // what you actually set
+struct Word {                       // colour only - the animation is global
     char    name[NAME_LEN];         // "INNOV", "IOT"
     uint8_t first;                  // index of its first letter
     uint8_t count;                  // how many letters it spans
     RGB     color;
-    uint8_t animation;
 };
 
 struct Settings {
     uint8_t  brightness;            // master 0-255
     uint8_t  speed;                 // 1-255
+    uint8_t  animation;             // one animation for the whole sign
     uint16_t ledCount;
     uint16_t maxMilliamps;          // 0 = uncapped
     uint8_t  dataPin;

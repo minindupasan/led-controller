@@ -9,7 +9,7 @@ static const char *NVS_KEY = "cfg";
 
 /* ------------------------------------------------------------ name tables */
 static const char *const ANIM_NAMES[ANIM_COUNT] = {
-    "OFF", "SOLID", "BREATHE", "TRAVERSE", "AURORA", "COMET"
+    "OFF", "SOLID", "BREATHE", "TRAVERSE", "AURORA", "COMET", "BOUNCE"
 };
 
 const char *animationName(uint8_t id) {
@@ -89,6 +89,7 @@ void Sign::loadDefaults() {
 
     _cfg.s.brightness   = 200;
     _cfg.s.speed        = 120;
+    _cfg.s.animation    = ANIM_BREATHE;
     _cfg.s.ledCount     = DEFAULT_LED_COUNT;
     _cfg.s.maxMilliamps = DEFAULT_MAX_MA;
     _cfg.s.dataPin      = DEFAULT_LED_PIN;
@@ -117,13 +118,11 @@ void Sign::loadDefaults() {
     _cfg.words[0].first     = 0;
     _cfg.words[0].count     = 5;
     _cfg.words[0].color     = RGB((uint32_t)COL_CYAN);
-    _cfg.words[0].animation = ANIM_BREATHE;
 
     setName(_cfg.words[1].name, "IOT");
     _cfg.words[1].first     = 5;
     _cfg.words[1].count     = 3;
     _cfg.words[1].color     = RGB((uint32_t)COL_AMBER);
-    _cfg.words[1].animation = ANIM_BREATHE;
 
     _dirty = true;
 }
@@ -244,6 +243,8 @@ void Sign::toJson(JsonObject root) const {
     s["maxMilliamps"] = _cfg.s.maxMilliamps;
     s["dataPin"]      = _cfg.s.dataPin;
     s["autoShow"]     = _cfg.s.autoShow;
+    s["anim"]         = _cfg.s.animation;
+    s["animName"]     = animationName(_cfg.s.animation);
 
     JsonArray words = root["words"].to<JsonArray>();
     for (uint8_t i = 0; i < _cfg.wordCount; i++) {
@@ -252,8 +253,6 @@ void Sign::toJson(JsonObject root) const {
         o["i"]        = i;
         o["name"]     = w.name;
         o["color"]    = hex(w.color);
-        o["anim"]     = w.animation;
-        o["animName"] = animationName(w.animation);
         o["first"]    = w.first;
         o["count"]    = w.count;
         o["len"]      = wordLength(i);

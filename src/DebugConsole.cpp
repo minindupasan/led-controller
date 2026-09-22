@@ -56,9 +56,8 @@ void DebugConsole::printMenu() {
     o->println(F("======= INNOV IOT LED CONSOLE ======="));
     o->println(F(" STATE    s) status    l) list letters    v) validate"));
     o->println(F(" POWER    on | off | bright <0-255> | speed <1-255>"));
-    o->println(F(" WORDS    word color <INNOV|IOT|all> <purple|cyan|amber|#hex>"));
-    o->println(F("          word anim  <INNOV|IOT|all> <OFF|SOLID|BREATHE|"));
-    o->println(F("                                      TRAVERSE|AURORA|COMET>"));
+    o->println(F(" LOOK     anim <OFF|SOLID|BREATHE|TRAVERSE|AURORA|COMET|BOUNCE>"));
+    o->println(F("          word color <INNOV|IOT|all> <purple|cyan|amber|#hex>"));
     o->println(F(" SHOW     show start | show stop | show auto on|off"));
     o->println(F(" LETTERS  seg range <i|name> <start> <end>"));
     o->println(F("          seg on|off|rev|id <i|name>"));
@@ -130,6 +129,13 @@ String DebugConsole::execute(const String &cmdline) {
         return "ledCount=" + String(st.ledCount);
     }
 
+    if (cmd == "anim") {
+        st.animation = animationFromName(rest);
+        TheSign.markDirty();
+        TheShow.stop();                       // a manual change takes control
+        return String("animation = ") + animationName(st.animation) + " (whole sign)";
+    }
+
     if (cmd == "word") return cmdWord(rest);
     if (cmd == "seg")  return cmdLetter(rest);
     if (cmd == "test") return cmdTest(rest);
@@ -183,13 +189,15 @@ String DebugConsole::cmdWord(const String &args) {
         return String(all ? "all words" : TheSign.word(wi)->name) + " colour " + hex(c);
     }
     if (verb == "anim") {
-        uint8_t a = animationFromName(value);
-        for (uint8_t i = from; i <= to; i++) TheSign.word(i)->animation = a;
+        /* kept so old muscle memory and the UI's shortcuts still work - the
+           animation is global now, so this sets it for the whole sign */
+        TheSign.settings().animation = animationFromName(value);
         TheSign.markDirty();
         TheShow.stop();
-        return String(all ? "all words" : TheSign.word(wi)->name) + " -> " + animationName(a);
+        return String("animation = ") + animationName(TheSign.settings().animation) +
+               " (whole sign - animations are not per word)";
     }
-    return "word verbs: color <value> | anim <name>";
+    return "word verbs: color <value>     (animation is global: `anim <name>`)";
 }
 
 /* ----------------------------------------------------------------- letters */
@@ -302,13 +310,15 @@ String DebugConsole::cmdStatus() {
     String o = "\n--- STATUS ---------------------------------------";
     o += "\n power        : " + String(st.power ? "ON" : "OFF");
     o += "\n brightness   : " + String(st.brightness) + "/255   speed: " + String(st.speed);
+    o += "\n animation    : " + String(animationName(st.animation)) + "  (whole sign)";
     o += "\n show         : " + String(TheShow.stageName()) +
          (st.autoShow ? "  (auto on boot)" : "");
     for (uint8_t i = 0; i < TheSign.wordCount(); i++) {
         Word *w = TheSign.word(i);
-        o += "\n " + String(w->name) + String(9 - min<int>(8, strlen(w->name)), ' ') + ": " +
-             animationName(w->animation) + "  " + hex(w->color) +
-             "  (" + String(TheSign.wordLength(i)) + " px)";
+        char row[72];
+        snprintf(row, sizeof(row), "\n %-12s: %-9s (%u px)",
+                 w->name, hex(w->color).c_str(), TheSign.wordLength(i));
+        o += row;
     }
     o += "\n leds         : " + String(st.ledCount) + " on GPIO" + String(Leds.activePin());
     o += "\n letters      : " + String(TheSign.letterCount()) + "/" + String(MAX_LETTERS);

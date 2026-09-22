@@ -109,7 +109,7 @@ void LedController::renderFrame(uint32_t now) {
         uint16_t len = TheSign.wordLength(w);
         if (!len) continue;
 
-        uint8_t anim = wd->animation;
+        uint8_t anim = st.animation;
         uint8_t fade = 255;
         TheShow.override(w, anim, fade);
 

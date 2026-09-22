@@ -39,52 +39,35 @@ static void fxBreathe(const EffectCtx &c, RGB *out, uint16_t len) {
 }
 
 /*
- * TRAVERSE - a comet-like sweep across the whole sign, INNOV straight into
- * IOT, built from three parts so it reads as light rather than a lit strip:
+ * The sweep used by TRAVERSE and BOUNCE: a comet-like band built from three
+ * parts so it reads as light rather than a lit strip.
  *
  *   core   a short, near-white crest (tintOf, so it stays the same hue)
  *   body   the word's own colour either side of the crest
  *   wake   a long squared decay behind it, fading to black
  *
- * Between passes there is a short dark beat, which makes each sweep feel
- * deliberate instead of a conveyor belt. Everything not in the band is off.
+ * `forward` flips which side the wake trails on, so a reversing band drags
+ * its tail behind it instead of pushing it ahead.
  */
-static void fxTraverse(const EffectCtx &c, RGB *out, uint16_t len) {
-    if (!len) return;
-
-    const uint16_t total = c.chainTotal ? c.chainTotal : len;
-    const uint32_t rate  = pixelRate(c.speed);
-    const uint16_t band  = max<uint16_t>(8, total / 8);       // crest width
-    const uint16_t wake  = max<uint16_t>(band * 2, total / 4);// trailing glow
-    const int32_t  halfQ = Q8(band) / 2;
-    const int32_t  wakeQ = Q8(wake);
-
-    const uint32_t travelMs = (uint32_t)(total + band + wake) * 1000UL / rate;
-    const uint32_t holdMs   = travelMs / 7;                   // dark beat
-    const uint32_t cycle    = travelMs + holdMs;
-    if (!cycle) return;
-
-    uint32_t t = c.now % cycle;
-    fillSolid(out, len, RGB_BLACK);
-    if (t >= travelMs) return;                                // between passes
-
-    /* head position, started far enough back that the wake enters smoothly */
-    int32_t posQ8 = (int32_t)((uint64_t)t * rate * 256ULL / 1000ULL) - wakeQ;
-
+static void drawSweep(const EffectCtx &c, RGB *out, uint16_t len,
+                      int32_t posQ8, bool forward, uint16_t band, uint16_t wake) {
+    const int32_t halfQ = Q8(band) / 2;
+    const int32_t wakeQ = Q8(wake);
     const RGB base = c.color;
-    const RGB core = tintOf(base, 170);                       // same hue, near white
+    const RGB core = tintOf(base, 170);          // same hue, near white
 
     for (uint16_t i = 0; i < len; i++) {
-        int32_t d = posQ8 - (Q8(c.chainOffset + i) + 128);    // >0 = behind the head
+        int32_t pix = Q8(c.chainOffset + i) + 128;
+        int32_t d   = forward ? (posQ8 - pix) : (pix - posQ8);   // >0 = behind
 
         uint8_t lv = 0;
-        if (d < 0) {                                          // ahead of the head
+        if (d < 0) {                                             // ahead of the head
             if (-d < halfQ) lv = cos8((uint8_t)((127L * (-d)) / halfQ));
-        } else if (d < halfQ) {                               // the crest
+        } else if (d < halfQ) {                                  // the crest
             lv = cos8((uint8_t)((127L * d) / halfQ));
-        } else if (d < wakeQ) {                               // the wake
+        } else if (d < wakeQ) {                                  // the wake
             uint8_t b = 255 - (uint8_t)((255L * (d - halfQ)) / (wakeQ - halfQ));
-            lv = scale8(scale8(b, b), 165);                   // squared decay
+            lv = scale8(scale8(b, b), 165);                      // squared decay
         }
         if (!lv) continue;
 
@@ -93,6 +76,67 @@ static void fxTraverse(const EffectCtx &c, RGB *out, uint16_t len) {
         RGB col = (lv >= 170) ? blendColor(base, core, (uint8_t)((lv - 170) * 3)) : base;
         out[i] = scaleColorVideo(col, lv);
     }
+}
+
+static inline uint16_t sweepBand(uint16_t total) { return max<uint16_t>(8, total / 8); }
+static inline uint16_t sweepWake(uint16_t total) {
+    return max<uint16_t>(sweepBand(total) * 2, total / 4);
+}
+
+/*
+ * TRAVERSE - one pass across the whole sign, INNOV straight into IOT, then a
+ * short dark beat before the next. The beat is what makes each sweep feel
+ * deliberate rather than a conveyor belt.
+ */
+static void fxTraverse(const EffectCtx &c, RGB *out, uint16_t len) {
+    if (!len) return;
+    const uint16_t total = c.chainTotal ? c.chainTotal : len;
+    const uint32_t rate  = pixelRate(c.speed);
+    const uint16_t band  = sweepBand(total), wake = sweepWake(total);
+
+    const uint32_t travelMs = (uint32_t)(total + band + wake) * 1000UL / rate;
+    const uint32_t cycle    = travelMs + travelMs / 7;       // + dark beat
+    if (!cycle) return;
+
+    uint32_t t = c.now % cycle;
+    fillSolid(out, len, RGB_BLACK);
+    if (t >= travelMs) return;                               // between passes
+
+    int32_t posQ8 = (int32_t)((uint64_t)t * rate * 256ULL / 1000ULL) - Q8(wake);
+    drawSweep(c, out, len, posQ8, true, band, wake);
+}
+
+/*
+ * BOUNCE - sweeps the full length, then turns around and comes back.
+ *
+ * The position is an eased triangle rather than a linear ramp, so the band
+ * decelerates into each end, hangs for an instant and accelerates away -
+ * which is what makes it read as a bounce instead of a band that teleports
+ * back to the start. The wake flips with the direction.
+ */
+static void fxBounce(const EffectCtx &c, RGB *out, uint16_t len) {
+    if (!len) return;
+    const uint16_t total = c.chainTotal ? c.chainTotal : len;
+    const uint32_t rate  = pixelRate(c.speed);
+    const uint16_t band  = sweepBand(total), wake = sweepWake(total);
+
+    /* one leg of the journey, then the same again in reverse */
+    const uint32_t legMs = (uint32_t)(total + band) * 1000UL / rate;
+    const uint32_t cycle = legMs * 2;
+    if (!cycle) return;
+
+    uint32_t t = c.now % cycle;
+    bool forward = (t < legMs);
+
+    /* eased triangle: 0 -> 255 -> 0 across the full cycle */
+    uint8_t ph    = (uint8_t)((uint64_t)t * 255ULL / cycle);
+    uint8_t eased = ease8InOutCubic(triwave8(ph));
+
+    int32_t spanQ8 = Q8(total + band);
+    int32_t posQ8  = (int32_t)(((int64_t)spanQ8 * eased) / 255) - Q8(band) / 2;
+
+    fillSolid(out, len, RGB_BLACK);
+    drawSweep(c, out, len, posQ8, forward, band, wake);
 }
 
 /* Three non-harmonic waves summed along the word. Hue swings only +/-20
@@ -160,6 +204,7 @@ void Effects::render(uint8_t anim, const EffectCtx &ctx, RGB *out, uint16_t len)
         case ANIM_TRAVERSE: fxTraverse(ctx, out, len); break;
         case ANIM_AURORA:   fxAurora(ctx, out, len);   break;
         case ANIM_COMET:    fxComet(ctx, out, len);    break;
+        case ANIM_BOUNCE:   fxBounce(ctx, out, len);   break;
         case ANIM_OFF:
         default:            fillSolid(out, len, RGB_BLACK); break;
     }
