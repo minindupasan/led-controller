@@ -1,7 +1,8 @@
 #include "DebugConsole.h"
 #include "Config.h"
-#include "SegmentManager.h"
+#include "Sign.h"
 #include "LedController.h"
+#include "Show.h"
 #include "Logger.h"
 #include <ArduinoJson.h>
 
@@ -24,6 +25,12 @@ static String tok(const String &s, int n, char sep = ' ') {
 static RGB parseColor(const String &s, RGB fallback = RGB_WHITE) {
     String v = s;
     v.trim();
+    if (!v.length()) return fallback;
+
+    bool named = false;
+    RGB pal = paletteColor(v, &named);
+    if (named) return pal;
+
     v.replace("#", "");
     if (v.length() == 6) {
         uint32_t rgb = strtoul(v.c_str(), nullptr, 16);
@@ -31,12 +38,6 @@ static RGB parseColor(const String &s, RGB fallback = RGB_WHITE) {
     }
     if (v.indexOf(',') > 0)
         return RGB(tok(v, 0, ',').toInt(), tok(v, 1, ',').toInt(), tok(v, 2, ',').toInt());
-    v.toUpperCase();
-    if (v == "RED")   return RGB(255,0,0);
-    if (v == "GREEN") return RGB(0,255,0);
-    if (v == "BLUE")  return RGB(0,0,255);
-    if (v == "WHITE") return RGB_WHITE;
-    if (v == "OFF")   return RGB_BLACK;
     return fallback;
 }
 
@@ -47,35 +48,26 @@ static String hex(const RGB &c) {
 }
 
 /* --------------------------------------------------------------------- menu */
-void DebugConsole::begin() {
-    printMenu();
-}
+void DebugConsole::begin() { printMenu(); }
 
 void DebugConsole::printMenu() {
     Print *o = _out;
     o->println();
-    o->println(F("=========== INNOV+IOT SIGN - DEBUG CONSOLE ==========="));
-    o->println(F(" STATE     s) status      l) list segments   v) validate"));
-    o->println(F(" POWER     on | off       bright <0-255>     speed <1-255>"));
-    o->println(F(" LOOK      anim <name|id> intensity <0-255>  tint on|off"));
-    o->println(F("           mode <parallel|stagger|sequence>  stagger <ms>"));
-    o->println(F(" SEGMENTS  seg add <name> <start> <end>"));
-    o->println(F("           seg range <i|name> <start> <end>"));
-    o->println(F("           seg color <i|name> <#RRGGBB|red|r,g,b>"));
-    o->println(F("           seg anim  <i|name> <name|id|inherit>"));
-    o->println(F("           seg on|off|rev|del|id <i|name>"));
-    o->println(F("           seg bright <i|name> <0-255>       seg sort"));
-    o->println(F("           seg spread     divide the whole strip between letters"));
-    o->println(F(" SECTIONS  seg div <i|name> <count>          seg divlist <i|name>"));
-    o->println(F("           seg divrange <i|name> <k> <start> <end>   seg divauto <i|name>"));
-    o->println(F(" MAPPING   test index <n>      test range <a> <b>"));
-    o->println(F("           test walk [ms]      test all        test off"));
-    o->println(F(" CONFIG    save | load | defaults | ledcount <n> | ma <n>"));
-    o->println(F("           pin            show wiring / list usable GPIOs"));
-    o->println(F("           pin <gpio>     move the strip's data line (live)"));
-    o->println(F(" PROTOCOL  json (full state)   stat (telemetry)   hello"));
-    o->println(F(" SYSTEM    h) help   m) menu   clear   reboot"));
-    o->println(F("======================================================"));
+    o->println(F("======= INNOV IOT LED CONSOLE ======="));
+    o->println(F(" STATE    s) status    l) list letters    v) validate"));
+    o->println(F(" POWER    on | off | bright <0-255> | speed <1-255>"));
+    o->println(F(" WORDS    word color <INNOV|IOT|all> <purple|cyan|amber|#hex>"));
+    o->println(F("          word anim  <INNOV|IOT|all> <OFF|SOLID|BREATHE|"));
+    o->println(F("                                      TRAVERSE|AURORA|COMET>"));
+    o->println(F(" SHOW     show start | show stop | show auto on|off"));
+    o->println(F(" LETTERS  seg range <i|name> <start> <end>"));
+    o->println(F("          seg on|off|rev|id <i|name>"));
+    o->println(F(" MAPPING  test index <n> | test range <a> <b>"));
+    o->println(F("          test walk [ms] | test all | test off"));
+    o->println(F(" CONFIG   save | load | defaults | ledcount <n> | ma <n>"));
+    o->println(F("          pin | pin <gpio>"));
+    o->println(F(" PROTOCOL json | stat | hello        SYSTEM  h | clear | reboot"));
+    o->println(F("====================================="));
 }
 
 /* --------------------------------------------------------------------- loop */
@@ -109,223 +101,194 @@ String DebugConsole::execute(const String &cmdline) {
     String rest = line.substring(cmd.length());
     rest.trim();
 
-    GlobalSettings &g = Segments.globals();
+    Settings &st = TheSign.settings();
 
     if (cmd == "h" || cmd == "help" || cmd == "m" || cmd == "menu") { printMenu(); return ""; }
-    if (cmd == "s" || cmd == "status")   return cmdStatus();
-    if (cmd == "l" || cmd == "list")     return cmdList();
-    if (cmd == "clear")                  { Log.clear(); return "log cleared"; }
-    if (cmd == "reboot")                 { Serial.println("rebooting..."); delay(200); ESP.restart(); }
+    if (cmd == "s" || cmd == "status") return cmdStatus();
+    if (cmd == "l" || cmd == "list")   return cmdList();
+    if (cmd == "clear")  { Log.clear(); return "log cleared"; }
+    if (cmd == "reboot") { Serial.println("rebooting..."); delay(200); ESP.restart(); }
 
-    if (cmd == "on")  { g.power = true;  Segments.markDirty(); return "power ON"; }
-    if (cmd == "off") { g.power = false; Segments.markDirty(); return "power OFF"; }
+    if (cmd == "on")  { st.power = true;  TheSign.markDirty(); return "power ON"; }
+    if (cmd == "off") { st.power = false; TheSign.markDirty(); return "power OFF"; }
 
-    if (cmd == "bright")    { g.brightness = constrain(rest.toInt(), 0, 255); Segments.markDirty(); return "brightness=" + String(g.brightness); }
-    if (cmd == "speed")     { g.speed = constrain(rest.toInt(), 1, 255);      Segments.markDirty(); return "speed=" + String(g.speed); }
-    if (cmd == "intensity") { g.intensity = constrain(rest.toInt(), 0, 255);  Segments.markDirty(); return "intensity=" + String(g.intensity); }
-    if (cmd == "stagger")   { g.stagger = constrain(rest.toInt(), 0, 5000);   Segments.markDirty(); return "stagger=" + String(g.stagger) + "ms"; }
+    if (cmd == "bright") { st.brightness = constrain(rest.toInt(), 0, 255); TheSign.markDirty(); return "brightness=" + String(st.brightness); }
+    if (cmd == "speed")  { st.speed = constrain(rest.toInt(), 1, 255); TheSign.markDirty(); return "speed=" + String(st.speed); }
+
     if (cmd == "ma") {
         long v = rest.toInt();
-        g.maxMilliamps = (v <= 0) ? 0 : (uint16_t)constrain(v, 100L, 60000L);
-        Segments.markDirty();
-        return g.maxMilliamps ? ("power budget=" + String(g.maxMilliamps) + "mA")
-                              : String("power cap OFF - brightness is not limited "
-                                       "(size the PSU for it)");
-    }
-
-    if (cmd == "tint") { g.rainbowTint = rest.startsWith("on"); Segments.markDirty(); return String("tint ") + (g.rainbowTint ? "on" : "off"); }
-
-    if (cmd == "anim") {
-        g.animation = animationIdFromName(rest);
-        Segments.markDirty();
-        return String("animation=") + animationName(g.animation);
-    }
-
-    if (cmd == "mode") {
-        String m = rest; m.toLowerCase();
-        if (m.startsWith("par")) g.playMode = PLAY_PARALLEL;
-        else if (m.startsWith("seq")) g.playMode = PLAY_SEQUENCE;
-        else g.playMode = PLAY_STAGGER;
-        Segments.markDirty();
-        return "playMode=" + String(g.playMode);
+        st.maxMilliamps = (v <= 0) ? 0 : (uint16_t)constrain(v, 100L, 60000L);
+        TheSign.markDirty();
+        return st.maxMilliamps ? ("power budget=" + String(st.maxMilliamps) + "mA")
+                               : String("power cap OFF - brightness is not limited");
     }
 
     if (cmd == "ledcount") {
-        g.ledCount = constrain(rest.toInt(), 1, MAX_LEDS);
-        Segments.markDirty();
+        st.ledCount = constrain(rest.toInt(), 1, MAX_LEDS);
+        TheSign.markDirty();
         Leds.restartStrip();
-        return "ledCount=" + String(g.ledCount);
+        return "ledCount=" + String(st.ledCount);
     }
+
+    if (cmd == "word") return cmdWord(rest);
+    if (cmd == "seg")  return cmdLetter(rest);
+    if (cmd == "test") return cmdTest(rest);
+    if (cmd == "show") return cmdShow(rest);
+    if (cmd == "pin")  return cmdPin(rest);
 
     if (cmd == "json" || cmd == "state") { emitState();  return ""; }
     if (cmd == "stat")                   { emitStatus(); return ""; }
     if (cmd == "hello" || cmd == "id")   { emitHello();  return ""; }
 
-    if (cmd == "pin")   return cmdPin(rest);
+    if (cmd == "save")     return TheSign.save() ? "config saved" : "SAVE FAILED";
+    if (cmd == "load")     return TheSign.load() ? "config loaded" : "nothing stored";
+    if (cmd == "defaults") { TheSign.loadDefaults(); Leds.restartStrip(); return "defaults loaded (type `save` to keep)"; }
 
-    if (cmd == "seg")   return cmdSeg(rest);
-    if (cmd == "test")  return cmdTest(rest);
-
-    if (cmd == "save")     return Segments.save() ? "config saved" : "SAVE FAILED";
-    if (cmd == "load")     return Segments.load() ? "config loaded" : "nothing stored";
-    if (cmd == "defaults") { Segments.loadDefaults(); Leds.restartStrip(); return "defaults loaded (not saved - type `save`)"; }
     if (cmd == "v" || cmd == "validate") {
-        SegmentManager::Issue issues[12];
-        uint8_t n = Segments.validate(issues, 12);
-        if (!n) return "OK - no overlaps, all ranges inside 0.." + String(g.ledCount - 1);
-        String out = String(n) + " issue(s):";
+        Sign::Issue issues[12];
+        uint8_t n = TheSign.validate(issues, 12);
+        if (!n) return "OK - no overlaps, all ranges inside 0.." + String(st.ledCount - 1);
+        String o = String(n) + " issue(s):";
         for (uint8_t i = 0; i < n && i < 12; i++) {
-            out += "\n  - seg " + String(issues[i].segA);
-            if (issues[i].segB >= 0) out += " <-> seg " + String(issues[i].segB);
-            out += ": " + String(issues[i].what);
+            o += "\n  - letter " + String(issues[i].a);
+            if (issues[i].b >= 0) o += " <-> " + String(issues[i].b);
+            o += ": " + String(issues[i].what);
         }
-        return out;
+        return o;
     }
 
     return "unknown command: " + cmd + "   (type `h`)";
 }
 
-/* ---------------------------------------------------------------- sub-verbs */
-static int resolveSeg(const String &ref) {
+/* ------------------------------------------------------------------- words */
+String DebugConsole::cmdWord(const String &args) {
+    String verb = tok(args, 0);
+    verb.toLowerCase();
+    String target = tok(args, 1);
+    String value  = tok(args, 2);
+
+    bool all = target.equalsIgnoreCase("all");
+    int wi = all ? 0 : TheSign.wordByName(target);
+    if (!all && wi < 0 && target.length() && isDigit(target[0])) wi = target.toInt();
+    if (!all && !TheSign.word(wi)) return "usage: word <color|anim> <INNOV|IOT|all> <value>";
+
+    uint8_t from = all ? 0 : wi;
+    uint8_t to   = all ? TheSign.wordCount() - 1 : wi;
+
+    if (verb == "color") {
+        RGB c = parseColor(value);
+        for (uint8_t i = from; i <= to; i++) TheSign.word(i)->color = c;
+        TheSign.markDirty();
+        TheShow.stop();                       // a manual change takes control
+        return String(all ? "all words" : TheSign.word(wi)->name) + " colour " + hex(c);
+    }
+    if (verb == "anim") {
+        uint8_t a = animationFromName(value);
+        for (uint8_t i = from; i <= to; i++) TheSign.word(i)->animation = a;
+        TheSign.markDirty();
+        TheShow.stop();
+        return String(all ? "all words" : TheSign.word(wi)->name) + " -> " + animationName(a);
+    }
+    return "word verbs: color <value> | anim <name>";
+}
+
+/* ----------------------------------------------------------------- letters */
+static int resolveLetter(const String &ref) {
     if (!ref.length()) return -1;
     if (isDigit(ref[0])) {
         int i = ref.toInt();
-        return Segments.get(i) ? i : -1;
+        return TheSign.letter(i) ? i : -1;
     }
-    return Segments.indexOfName(ref);
+    return TheSign.letterByName(ref);
 }
 
-String DebugConsole::cmdSeg(const String &args) {
+String DebugConsole::cmdLetter(const String &args) {
+    String verb = tok(args, 0);
+    verb.toLowerCase();
+    int idx = resolveLetter(tok(args, 1));
+    Letter *l = TheSign.letter(idx);
+    if (!l) return "usage: seg <range|on|off|rev|id|name> <index|name> ...  (`l` to list)";
+
+    if (verb == "range") {
+        TheSign.setRange(idx, tok(args, 2).toInt(), tok(args, 3).toInt());
+        return String(l->name) + " -> " + String(l->start) + "-" + String(l->end) +
+               " (" + String(l->length()) + " px)";
+    }
+    if (verb == "on")   { l->enabled = true;  TheSign.markDirty(); return String(l->name) + " enabled"; }
+    if (verb == "off")  { l->enabled = false; TheSign.markDirty(); return String(l->name) + " disabled"; }
+    if (verb == "rev")  { l->reversed = !l->reversed; TheSign.markDirty(); return String(l->name) + " reversed=" + String(l->reversed); }
+    if (verb == "id")   { Leds.identify(idx); return "blinking " + String(l->name); }
+    if (verb == "name") {
+        String n = tok(args, 2);
+        ::strncpy(l->name, n.c_str(), NAME_LEN - 1);
+        l->name[NAME_LEN - 1] = 0;
+        TheSign.markDirty();
+        return "renamed to " + n;
+    }
+    return "seg verbs: range on off rev id name";
+}
+
+/* -------------------------------------------------------------------- show */
+String DebugConsole::cmdShow(const String &args) {
     String verb = tok(args, 0);
     verb.toLowerCase();
 
-    if (verb == "sort") { Segments.sortByStart(); return "segments sorted by start index"; }
-
-    if (verb == "spread") {
-        Segments.spreadEvenly();
-        GlobalSettings &g = Segments.globals();
-        return "segments spread evenly across " + String(g.ledCount) + " LEDs (" +
-               String(g.ledCount / max<uint8_t>(Segments.count(), 1)) + " each) - `l` to list";
+    if (verb == "start") { TheShow.start(); return "show started - wait, opener, then calm"; }
+    if (verb == "stop")  { TheShow.stop();  return "show stopped - words under manual control"; }
+    if (verb == "auto") {
+        String v = tok(args, 1);
+        TheSign.settings().autoShow = v.startsWith("on");
+        TheSign.save();
+        return String("auto-run on boot ") + (TheSign.settings().autoShow ? "on" : "off");
     }
-
-    if (verb == "add") {
-        String name = tok(args, 1);
-        int a = tok(args, 2).toInt(), b = tok(args, 3).toInt();
-        int i = Segments.add(name, a, b);
-        return (i < 0) ? "segment table full"
-                       : "added [" + String(i) + "] " + name + " " + String(a) + "-" + String(b);
-    }
-
-    int idx = resolveSeg(tok(args, 1));
-    Segment *s = Segments.get(idx);
-    if (!s) return "usage: seg <verb> <index|name> ...   (`l` to list)";
-
-    if (verb == "div") {
-        uint8_t n = tok(args, 2).toInt();
-        Segments.setDivisions(idx, n);
-        return String(s->name) + " split into " + String(divisionCount(*s)) +
-               " sections (+ all-glow step)";
-    }
-    if (verb == "divauto") {
-        Segments.autoSplit(idx);
-        return String(s->name) + " sections re-split evenly";
-    }
-    if (verb == "divrange") {
-        uint8_t k = tok(args, 2).toInt();
-        uint16_t a = tok(args, 3).toInt(), b = tok(args, 4).toInt();
-        if (!Segments.setDivisionRange(idx, k, a, b))
-            return "usage: seg divrange <i|name> <k> <start> <end>";
-        uint16_t ra, rb;
-        divisionBounds(*s, k, ra, rb);
-        return String(s->name) + " section " + String(k) + " -> " +
-               String(ra) + "-" + String(rb);
-    }
-    if (verb == "divlist") {
-        uint8_t n = divisionCount(*s);
-        String o = String(s->name) + ": " + String(n) + " sections" +
-                   (s->customDiv ? " (custom)" : " (even split)") + " + all-glow";
-        for (uint8_t k = 0; k < n; k++) {
-            uint16_t a, b;
-            if (!divisionBounds(*s, k, a, b)) continue;
-            o += "\n   [" + String(k) + "] " + String(a) + "-" + String(b) +
-                 "  (" + String(b - a + 1) + " leds)";
-        }
-        return o;
-    }
-    if (verb == "range") {
-        uint16_t a = tok(args, 2).toInt(), b = tok(args, 3).toInt();
-        Segments.setRange(idx, a, b);
-        return String(s->name) + " -> " + String(s->start) + "-" + String(s->end) +
-               " (" + String(s->length()) + " leds)";
-    }
-    if (verb == "color")  { s->color  = parseColor(tok(args, 2)); Segments.markDirty(); return String(s->name) + " color " + hex(s->color); }
-    if (verb == "color2") { s->color2 = parseColor(tok(args, 2), RGB_BLACK); Segments.markDirty(); return String(s->name) + " color2 " + hex(s->color2); }
-    if (verb == "anim")   { s->animation = animationIdFromName(tok(args, 2)); Segments.markDirty(); return String(s->name) + " anim " + animationName(s->animation); }
-    if (verb == "bright") { s->brightness = constrain(tok(args, 2).toInt(), 0, 255); Segments.markDirty(); return String(s->name) + " bright " + String(s->brightness); }
-    if (verb == "on")     { s->enabled = true;  Segments.markDirty(); return String(s->name) + " enabled"; }
-    if (verb == "off")    { s->enabled = false; Segments.markDirty(); return String(s->name) + " disabled"; }
-    if (verb == "rev")    { s->reversed = !s->reversed; Segments.markDirty(); return String(s->name) + " reversed=" + String(s->reversed); }
-    if (verb == "id")     { Leds.identify(idx); return "blinking " + String(s->name); }
-    if (verb == "del")    { String n = s->name; Segments.remove(idx); return "removed " + n; }
-    if (verb == "name")   { String n = tok(args, 2); ::strncpy(s->name, n.c_str(), SEG_NAME_LEN - 1); s->name[SEG_NAME_LEN - 1] = 0; Segments.markDirty(); return "renamed to " + n; }
-
-    return "seg verbs: add range color color2 anim bright on off rev id del name sort spread\n"
-           "           div divrange divauto divlist";
+    return String("show stage: ") + TheShow.stageName() + "   (show start | stop | auto on|off)";
 }
 
+/* -------------------------------------------------------------------- test */
 String DebugConsole::cmdTest(const String &args) {
     String verb = tok(args, 0);
     verb.toLowerCase();
 
-    if (verb == "off" || verb == "")   { Leds.testOff(); return "test overlay off"; }
-    if (verb == "index") { uint16_t n = tok(args, 1).toInt(); Leds.testIndex(n, parseColor(tok(args, 2))); return "LED " + String(n) + " lit"; }
+    if (verb == "off" || verb == "") { Leds.testOff(); return "test overlay off"; }
+    if (verb == "index") {
+        uint16_t n = tok(args, 1).toInt();
+        Leds.testIndex(n, parseColor(tok(args, 2)));
+        return "LED " + String(n) + " lit";
+    }
     if (verb == "range") {
         uint16_t a = tok(args, 1).toInt(), b = tok(args, 2).toInt();
         Leds.testRange(a, b, parseColor(tok(args, 3)));
-        return "range " + String(a) + "-" + String(b) + " lit (" + String(b - a + 1) + " leds)";
-    }
-    if (verb == "div") {
-        int i = resolveSeg(tok(args, 1));
-        const Segment *sg = Segments.get(i);
-        if (!sg) return "usage: test div <i|name> <k>";
-        uint8_t k = tok(args, 2).toInt();
-        uint16_t a, b;
-        if (!divisionBounds(*sg, k, a, b)) return "no such section";
-        Leds.testRange(a, b, parseColor(tok(args, 3)));
-        return String(sg->name) + " section " + String(k) + ": " + String(a) + "-" + String(b);
+        return "range " + String(a) + "-" + String(b) + " lit (" + String(b - a + 1) + " px)";
     }
     if (verb == "all")  { Leds.testAll(parseColor(tok(args, 1))); return "all LEDs lit"; }
     if (verb == "walk") {
         uint16_t d = tok(args, 1).length() ? tok(args, 1).toInt() : 400;
         Leds.testWalk(d);
-        return "walking one LED every " + String(d) + "ms (markers every 10) - `test off` to stop";
+        return "walking one LED every " + String(d) + "ms (marks every 10) - `test off` to stop";
     }
-    return "test verbs: index <n> | range <a> <b> | div <seg> <k> | walk [ms] | all | off";
+    return "test verbs: index <n> | range <a> <b> | walk [ms] | all | off";
 }
 
+/* --------------------------------------------------------------------- pin */
 String DebugConsole::cmdPin(const String &args) {
-    GlobalSettings &g = Segments.globals();
+    Settings &st = TheSign.settings();
 
     if (!args.length()) {
         String o = "\n--- LED DATA PIN ---------------------------------";
         o += "\n driving now : GPIO" + String(Leds.activePin());
-        o += "\n configured  : GPIO" + String(g.dataPin);
-
+        o += "\n configured  : GPIO" + String(st.dataPin);
         o += "\n usable      : 2 4 5 12 13 14 15 16 17 18 19 21 22 23 25 26 27 32 33";
         o += "\n avoid       : 1/3 (this console), 6-11 (flash), 34-39 (input only)";
-        o += "\n\n set it with:  pin <gpio>     e.g.  pin 5";
         o += "\n--------------------------------------------------";
         return o;
     }
 
     int p = args.toInt();
-    if (!isValidLedPin(p))
-        return "GPIO" + String(p) + " can't drive the strip. Usable: "
-               "2 4 5 12 13 14 15 16 17 18 19 21 22 23 25 26 27 32 33";
+    if (!isValidLedPin(p)) return "GPIO" + String(p) + " can't drive the strip";
 
-    g.dataPin = (uint8_t)p;
-    Segments.save();
-    Leds.restartStrip();            // NeoPixelBus rebuilds live - no reboot
+    st.dataPin = (uint8_t)p;
+    TheSign.save();
+    Leds.restartStrip();
 
     String o = "data pin now GPIO" + String(p) + " (saved, applied immediately)";
     const char *warn = ledPinWarning(p);
@@ -333,49 +296,56 @@ String DebugConsole::cmdPin(const String &args) {
     return o;
 }
 
-/* ------------------------------------------------------------------ reports */
+/* ----------------------------------------------------------------- reports */
 String DebugConsole::cmdStatus() {
-    GlobalSettings &g = Segments.globals();
+    Settings &st = TheSign.settings();
     String o = "\n--- STATUS ---------------------------------------";
-    o += "\n power        : " + String(g.power ? "ON" : "OFF");
-    o += "\n animation    : " + String(animationName(g.animation));
-    o += "\n brightness   : " + String(g.brightness) + "/255";
-    o += "\n speed        : " + String(g.speed) + "   intensity: " + String(g.intensity);
-    o += "\n playMode     : " + String(g.playMode == PLAY_PARALLEL ? "parallel" :
-                                       g.playMode == PLAY_STAGGER  ? "stagger"  : "sequence");
-    o += "  stagger: " + String(g.stagger) + "ms";
-    o += "\n leds         : " + String(g.ledCount) + " on GPIO" + String(Leds.activePin());
-    o += "\n segments     : " + String(Segments.count()) + "/" + String(MAX_SEGMENTS);
+    o += "\n power        : " + String(st.power ? "ON" : "OFF");
+    o += "\n brightness   : " + String(st.brightness) + "/255   speed: " + String(st.speed);
+    o += "\n show         : " + String(TheShow.stageName()) +
+         (st.autoShow ? "  (auto on boot)" : "");
+    for (uint8_t i = 0; i < TheSign.wordCount(); i++) {
+        Word *w = TheSign.word(i);
+        o += "\n " + String(w->name) + String(9 - min<int>(8, strlen(w->name)), ' ') + ": " +
+             animationName(w->animation) + "  " + hex(w->color) +
+             "  (" + String(TheSign.wordLength(i)) + " px)";
+    }
+    o += "\n leds         : " + String(st.ledCount) + " on GPIO" + String(Leds.activePin());
+    o += "\n letters      : " + String(TheSign.letterCount()) + "/" + String(MAX_LETTERS);
     o += "\n fps          : " + String(Leds.fps(), 1) + "   frames: " + String(Leds.frames());
     o += "\n est. current : ~" + String(Leds.estimatedMilliamps()) + " mA (budget " +
-         (g.maxMilliamps ? String(g.maxMilliamps) : String("off")) + ")";
+         (st.maxMilliamps ? String(st.maxMilliamps) : String("off")) + ")";
     o += "\n test overlay : " + String(Leds.test().mode == TEST_NONE ? "none" : "ACTIVE");
     o += "\n free heap    : " + String(ESP.getFreeHeap()) + " B";
     o += "\n uptime       : " + String(millis() / 1000) + " s";
-    o += "\n unsaved      : " + String(Segments.dirty() ? "yes (type `save`)" : "no");
+    o += "\n unsaved      : " + String(TheSign.dirty() ? "yes (type `save`)" : "no");
     o += "\n--------------------------------------------------";
     return o;
 }
 
 String DebugConsole::cmdList() {
-    String o = "\n idx name      range        len  en rev anim       bright  color";
-    o += "\n ---------------------------------------------------------------------";
-    for (uint8_t i = 0; i < Segments.count(); i++) {
-        const Segment *s = Segments.get(i);
-        char row[128];
-        char range[16];
-        snprintf(range, sizeof(range), "%u-%u", s->start, s->end);
-        snprintf(row, sizeof(row), "\n %3u %-9s %-12s %4u  %s  %s  %-10s %3u    %s",
-                 i, s->name, range, s->length(),
-                 s->enabled ? "Y" : "n", s->reversed ? "Y" : "n",
-                 animationName(s->animation), s->brightness, hex(s->color).c_str());
+    String o = "\n idx name   range        len  en rev  word";
+    o += "\n ------------------------------------------------";
+    for (uint8_t i = 0; i < TheSign.letterCount(); i++) {
+        const Letter *l = TheSign.letter(i);
+        int owner = -1;
+        for (uint8_t w = 0; w < TheSign.wordCount(); w++)
+            if (i >= TheSign.word(w)->first && i < TheSign.word(w)->first + TheSign.word(w)->count)
+                owner = w;
+
+        char range[16], row[96];
+        snprintf(range, sizeof(range), "%u-%u", l->start, l->end);
+        snprintf(row, sizeof(row), "\n %3u %-6s %-12s %4u  %s  %s   %s",
+                 i, l->name, range, l->length(),
+                 l->enabled ? "Y" : "n", l->reversed ? "Y" : "n",
+                 owner >= 0 ? TheSign.word(owner)->name : "-");
         o += row;
     }
-    o += "\n ---------------------------------------------------------------------";
+    o += "\n ------------------------------------------------";
     return o;
 }
 
-/* ----------------------------------------------------------------- protocol */
+/* ---------------------------------------------------------------- protocol */
 static void emitLine(JsonDocument &d) {
     Print *o = Console.out();
     o->print(F("#J"));
@@ -386,12 +356,11 @@ static void emitLine(JsonDocument &d) {
 void DebugConsole::emitHello() {
     JsonDocument d;
     d["type"]     = "hello";
-    d["device"]   = "INNOV+IOT SIGN";
-    d["fw"]       = "1.0.0";
-    d["protocol"] = 1;
+    d["device"]   = "INNOV IOT LED CONSOLE";
+    d["fw"]       = "2.0.0";
+    d["protocol"] = 2;
     d["chip"]     = ESP.getChipModel();
     d["maxLeds"]  = MAX_LEDS;
-    d["maxSegs"]  = MAX_SEGMENTS;
     emitLine(d);
 }
 
@@ -399,7 +368,8 @@ void DebugConsole::emitState() {
     JsonDocument d;
     JsonObject root = d.to<JsonObject>();
     root["type"] = "state";
-    Segments.toJson(root);
+    TheSign.toJson(root);
+    root["show"] = TheShow.stageName();
     emitLine(d);
 }
 
@@ -414,20 +384,12 @@ void DebugConsole::emitStatus() {
     d["ma"]        = Leds.estimatedMilliamps();
     d["heap"]      = ESP.getFreeHeap();
     d["uptime"]    = millis() / 1000;
-    d["leds"]      = Segments.globals().ledCount;
+    d["leds"]      = TheSign.settings().ledCount;
     d["pin"]       = Leds.activePin();
-    d["segments"]  = Segments.count();
-    d["power"]     = Segments.globals().power;
+    d["power"]     = TheSign.settings().power;
+    d["show"]      = TheShow.stageName();
     d["testMode"]  = TEST_NAMES[t.mode <= TEST_WALK ? t.mode : 0];
     d["testIndex"] = t.index;
-    d["dirty"]     = Segments.dirty();
-    emitLine(d);
-}
-
-void DebugConsole::emitAck(const String &cmd, const String &out) {
-    JsonDocument d;
-    d["type"] = "ack";
-    d["cmd"]  = cmd;
-    d["out"]  = out;
+    d["dirty"]     = TheSign.dirty();
     emitLine(d);
 }

@@ -1,6 +1,10 @@
 /*
- * Config.h - compile-time configuration & shared data types
- * INNOV+IOT WS2812B sign controller
+ * Config.h - hardware setup and the sign's data model.
+ *
+ * The board drives the INNOV IOT letters only: 591 LEDs, contiguous.
+ * The oil-lamp logo lives on a separate ESP32.
+ *
+ * Geometry belongs to letters; colour and animation belong to words.
  */
 #pragma once
 
@@ -9,145 +13,94 @@
 
 /* ---------------------------------------------------------------- hardware */
 #define DEFAULT_LED_PIN     13      // WS2812B DIN (through a 330R resistor)
-                                    // runtime-selectable: `pin <n>` + reboot
-                                    // GPIO14 has no boot-strapping role, unlike
-                                    // 12 and 15, so it is a safe data line.
-#define LED_COLOR_ORDER     GRB     // WS2812B is GRB
-#define MAX_LEDS            2000    // hard ceiling for the static buffers
-                                    // (4 static RGB/uint8 buffers ~ 16 kB RAM)
-#define DEFAULT_LED_COUNT   1000    // the real strip length     // runtime count, editable from the web UI
+#define MAX_LEDS            2000    // ceiling for the static frame buffers
+#define DEFAULT_LED_COUNT   591     // measured: letters I..T, 0-590
 #define PSU_VOLTS           5
-#define DEFAULT_MAX_MA      0       // total draw cap in mA, enforced in
-                                    // pushToStrip(). 0 = no cap, run the
-                                    // strip at the brightness asked for.
+#define DEFAULT_MAX_MA      0       // 0 = no cap; brightness 255 is true full
+#define STATUS_LED_PIN      2
 
-#define STATUS_LED_PIN      2       // on-board LED, heartbeat
-
-/* ------------------------------------------------------------------ system */
-#define MAX_SEGMENTS        24
-#define MAX_DIVISIONS       16      // sub-sections inside one segment (logo)
-#define SEG_NAME_LEN        12
-/* Upper bound only. WS2812B needs ~30 us per LED, so the real ceiling falls
-   out of the strip length (1000 LEDs -> 30 ms -> ~33 fps). LedController
-   derives the actual frame budget from ledCount at runtime. */
-#define TARGET_FPS          60
+/* ------------------------------------------------------------------ limits */
+#define MAX_LETTERS         16
+#define MAX_WORDS           4
+#define NAME_LEN            8
+#define TARGET_FPS          60      // upper bound; the wire decides the rest
 #define LED_US_PER_PIXEL    30
-#define TEST_TIMEOUT_MS     120000  // a forgotten test overlay releases itself
-#define CONFIG_VERSION      7
+#define CONFIG_VERSION      8
+
+/* ----------------------------------------------------------------- palette */
+/* Purple / cyan / amber. Gradients stay inside a base hue - see tintOf(). */
+#define COL_PURPLE          0x7B2FF7
+#define COL_CYAN            0x00E5FF
+#define COL_AMBER           0xFFB020
 
 /* -------------------------------------------------------------- animations */
 enum AnimationId : uint8_t {
     ANIM_OFF = 0,
     ANIM_SOLID,
-    ANIM_BREATHE,
-    ANIM_PULSE,
-    ANIM_TRAVERSE,
-    ANIM_COMET,
-    ANIM_WIPE,
-    ANIM_THEATER,
-    ANIM_SPARKLE,
-    ANIM_RAINBOW,
-    ANIM_GRADIENT,
-    ANIM_STROBE,
-    ANIM_FIRE,
-    ANIM_TWINKLE,
-    ANIM_BUILD,                     // sub-sections light up cumulatively, then all glow
-    ANIM_STEPS,                     // one sub-section at a time, then all glow
-    ANIM_COUNT,
-    ANIM_INHERIT = 255              // segment follows the global animation
-};
-
-/* Order in which segments are staggered / sequenced. */
-enum PlayMode : uint8_t {
-    PLAY_PARALLEL = 0,   // every segment animates together
-    PLAY_STAGGER,        // each segment phase-shifted by `stagger` ms
-    PLAY_SEQUENCE        // one segment at a time, round-robin
+    ANIM_BREATHE,       // calm pulse - the resting state
+    ANIM_TRAVERSE,      // band sweeps the word, letter to letter, no gaps
+    ANIM_AURORA,        // layered waves, hue drifting near the base colour
+    ANIM_COMET,         // bright head with a decaying tail
+    ANIM_COUNT
 };
 
 /* ------------------------------------------------------------ data objects */
-struct Segment {
-    char     name[SEG_NAME_LEN];
-    uint16_t start;                 // first LED index (inclusive)
-    uint16_t end;                   // last  LED index (inclusive)
+struct Letter {                     // geometry only
+    char     name[NAME_LEN];
+    uint16_t start;                 // first LED (inclusive)
+    uint16_t end;                   // last  LED (inclusive)
     bool     enabled;
-    bool     reversed;              // physical wiring runs backwards
-    RGB      color;                 // primary colour
-    RGB      color2;                // secondary (gradient / comet tail)
-    uint8_t  animation;             // AnimationId or ANIM_INHERIT
-    uint8_t  brightness;            // 0-255 local scale
-
-    /* Sub-sections: the logo is built from several pieces that BUILD / STEPS
-       light in turn before the final all-glow step. Divisions are a
-       contiguous partition of the segment, described by each piece's last
-       LED; with customDiv == false they are recomputed as an even split. */
-    uint8_t  divisions;             // 0 or 1 = undivided
-    bool     customDiv;             // true = divEnd[] was edited by hand
-    uint16_t divEnd[MAX_DIVISIONS];
+    bool     reversed;              // physical run is wired backwards
 
     uint16_t length() const { return (end >= start) ? (end - start + 1) : 0; }
 };
 
-struct GlobalSettings {
+struct Word {                       // what you actually set
+    char    name[NAME_LEN];         // "INNOV", "IOT"
+    uint8_t first;                  // index of its first letter
+    uint8_t count;                  // how many letters it spans
+    RGB     color;
+    uint8_t animation;
+};
+
+struct Settings {
     uint8_t  brightness;            // master 0-255
     uint8_t  speed;                 // 1-255
-    uint8_t  intensity;             // animation-specific "amount" 0-255
-    uint8_t  animation;             // default animation for segments
-    uint8_t  playMode;              // PlayMode
-    uint16_t stagger;               // ms offset per segment
-    uint16_t ledCount;              // active LEDs on the strip
-    uint8_t  dataPin;               // GPIO driving the strip (needs a reboot)
-    uint16_t maxMilliamps;          // power budget
-    bool     power;                 // master on/off
-    bool     rainbowTint;           // auto-cycle hue over all segments
+    uint16_t ledCount;
+    uint16_t maxMilliamps;          // 0 = uncapped
+    uint8_t  dataPin;
+    bool     power;
+    bool     autoShow;              // run the opener on boot
 };
 
-/* Unused while the Wi-Fi transport is parked in extras/wifi/, but kept in the
-   config blob so re-enabling it does not invalidate saved settings. */
-struct WifiSettings {
-    char ssid[33];
-    char pass[65];
-    bool useSta;
-    bool enabled;
-};
-
-/* Whole persisted configuration. */
 struct SignConfig {
-    uint16_t       version;
-    GlobalSettings g;
-    WifiSettings   wifi;
-    uint8_t        segmentCount;
-    Segment        segments[MAX_SEGMENTS];
+    uint16_t version;
+    Settings s;
+    uint8_t  letterCount;
+    uint8_t  wordCount;
+    Letter   letters[MAX_LETTERS];
+    Word     words[MAX_WORDS];
 };
 
-/* Live, non-persisted debug/test overlay. */
+/* Test overlay - the mapping tools paint over everything while active. */
 enum TestMode : uint8_t {
-    TEST_NONE = 0,
-    TEST_INDEX,      // light exactly one LED
-    TEST_RANGE,      // light an arbitrary range
-    TEST_ALL,        // every LED white
-    TEST_IDENTIFY,   // blink one segment
-    TEST_WALK        // auto-advancing single LED (mapping helper)
+    TEST_NONE = 0, TEST_INDEX, TEST_RANGE, TEST_ALL, TEST_IDENTIFY, TEST_WALK
 };
 
 struct TestState {
     uint8_t  mode      = TEST_NONE;
     uint16_t index     = 0;
     uint16_t rangeEnd  = 0;
-    int8_t   segment   = -1;
+    int8_t   letter    = -1;
     RGB      color     = RGB_WHITE;
     uint16_t walkDelay = 400;
     uint32_t lastStep  = 0;
 };
 
-/* Sub-section helpers (implemented in SegmentManager.cpp). */
-uint8_t divisionCount(const Segment &s);
-bool    divisionBounds(const Segment &s, uint8_t k, uint16_t &start, uint16_t &end);
+#define TEST_TIMEOUT_MS 120000      // a forgotten overlay releases itself
 
-/* Output-capable GPIOs that are safe for a WS2812B data line on an ESP32:
-   not the flash pins (6-11), not input-only (34-39), and not UART0 (1/3),
-   which this firmware needs for the console. */
+const char *animationName(uint8_t id);
+uint8_t     animationFromName(const String &name);
 bool        isValidLedPin(uint8_t pin);
-const char *ledPinWarning(uint8_t pin);   // nullptr when the pin is unremarkable
-
-extern const char *animationName(uint8_t id);
-extern uint8_t     animationIdFromName(const String &name);
+const char *ledPinWarning(uint8_t pin);
+RGB         paletteColor(const String &name, bool *found = nullptr);

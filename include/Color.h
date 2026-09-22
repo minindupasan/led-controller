@@ -106,6 +106,17 @@ static inline RGB blendColor(const RGB &a, const RGB &b, uint8_t frac) {
     return RGB(lerp8(a.r, b.r, frac), lerp8(a.g, b.g, frac), lerp8(a.b, b.b, frac));
 }
 
+/* Gradient rule: stay inside the base hue. A tint blends toward white, which
+   raises lightness and softens saturation without shifting hue at all - so
+   gradients read as "the same colour, lighter" rather than a clashing blend. */
+static inline RGB tintOf(const RGB &base, uint8_t amount) {
+    return RGB(lerp8(base.r, 255, amount), lerp8(base.g, 255, amount), lerp8(base.b, 255, amount));
+}
+
+static inline RGB shadeOf(const RGB &base, uint8_t amount) {
+    return RGB(scale8(base.r, 255 - amount), scale8(base.g, 255 - amount), scale8(base.b, 255 - amount));
+}
+
 static inline void fillSolid(RGB *buf, uint16_t n, const RGB &c) {
     for (uint16_t i = 0; i < n; i++) buf[i] = c;
 }
