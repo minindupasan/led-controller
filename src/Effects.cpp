@@ -32,30 +32,66 @@ static void fxSolid(const EffectCtx &c, RGB *out, uint16_t len) {
 /* Calm pulse: eased cubic so the turnaround at each end is soft, and a floor
    so the sign never goes fully dark mid-breath. */
 static void fxBreathe(const EffectCtx &c, RGB *out, uint16_t len) {
+    /* Full swing: the trough reaches black, so the sign really breathes in
+       and out rather than sitting lit and merely dimming. */
     uint8_t b = cubicwave8(phase8(c.now, max<uint8_t>(c.speed / 3, 1)));
-    b = qadd8(scale8(b, 205), 50);
     fillSolid(out, len, scaleColorVideo(c.color, b));
 }
 
-/* One band sweeps the whole word, letter to letter, without pausing. The
-   trailing edge leaves a faint tint of the same hue rather than black, which
-   reads as a glow following the band instead of a hard cut. */
+/*
+ * TRAVERSE - a comet-like sweep across the whole sign, INNOV straight into
+ * IOT, built from three parts so it reads as light rather than a lit strip:
+ *
+ *   core   a short, near-white crest (tintOf, so it stays the same hue)
+ *   body   the word's own colour either side of the crest
+ *   wake   a long squared decay behind it, fading to black
+ *
+ * Between passes there is a short dark beat, which makes each sweep feel
+ * deliberate instead of a conveyor belt. Everything not in the band is off.
+ */
 static void fxTraverse(const EffectCtx &c, RGB *out, uint16_t len) {
     if (!len) return;
+
     const uint16_t total = c.chainTotal ? c.chainTotal : len;
     const uint32_t rate  = pixelRate(c.speed);
-    const int32_t  halfQ = Q8(max<uint16_t>(6, total / 6)) / 2;
-    const uint32_t span  = total + (halfQ >> 7) + 2;
-    const uint32_t cycle = span * 1000UL / rate;
+    const uint16_t band  = max<uint16_t>(8, total / 8);       // crest width
+    const uint16_t wake  = max<uint16_t>(band * 2, total / 4);// trailing glow
+    const int32_t  halfQ = Q8(band) / 2;
+    const int32_t  wakeQ = Q8(wake);
+
+    const uint32_t travelMs = (uint32_t)(total + band + wake) * 1000UL / rate;
+    const uint32_t holdMs   = travelMs / 7;                   // dark beat
+    const uint32_t cycle    = travelMs + holdMs;
     if (!cycle) return;
 
-    int32_t posQ8 = (int32_t)((uint64_t)(c.now % cycle) * rate * 256ULL / 1000ULL) - halfQ;
-    RGB glow = shadeOf(c.color, 205);          // same hue, much darker
-    RGB head = tintOf(c.color, 60);            // same hue, slightly lighter
+    uint32_t t = c.now % cycle;
+    fillSolid(out, len, RGB_BLACK);
+    if (t >= travelMs) return;                                // between passes
+
+    /* head position, started far enough back that the wake enters smoothly */
+    int32_t posQ8 = (int32_t)((uint64_t)t * rate * 256ULL / 1000ULL) - wakeQ;
+
+    const RGB base = c.color;
+    const RGB core = tintOf(base, 170);                       // same hue, near white
 
     for (uint16_t i = 0; i < len; i++) {
-        uint8_t lv = bandLevel(c.chainOffset + i, posQ8, halfQ);
-        out[i] = lv ? blendColor(glow, head, lv) : glow;
+        int32_t d = posQ8 - (Q8(c.chainOffset + i) + 128);    // >0 = behind the head
+
+        uint8_t lv = 0;
+        if (d < 0) {                                          // ahead of the head
+            if (-d < halfQ) lv = cos8((uint8_t)((127L * (-d)) / halfQ));
+        } else if (d < halfQ) {                               // the crest
+            lv = cos8((uint8_t)((127L * d) / halfQ));
+        } else if (d < wakeQ) {                               // the wake
+            uint8_t b = 255 - (uint8_t)((255L * (d - halfQ)) / (wakeQ - halfQ));
+            lv = scale8(scale8(b, b), 165);                   // squared decay
+        }
+        if (!lv) continue;
+
+        /* gradient inside one hue: crest whitens, body is the pure colour,
+           and the falloff carries it down to black */
+        RGB col = (lv >= 170) ? blendColor(base, core, (uint8_t)((lv - 170) * 3)) : base;
+        out[i] = scaleColorVideo(col, lv);
     }
 }
 
@@ -82,7 +118,9 @@ static void fxAurora(const EffectCtx &c, RGB *out, uint16_t len) {
 
         uint8_t v = qadd8(scale8(w1, 150), scale8(w2, 105));
         v = scale8(v, qadd8(scale8(w3, 150), 105));
-        v = qadd8(scale8(v, 225), 30);                 // faint floor, never black
+        /* no floor: troughs fall to black, so the light visibly moves rather
+           than the whole word sitting lit and pulsing */
+        v = scale8(v, 255);
 
         int16_t swing = ((int16_t)w3 - 128) / 6;       // about +/-20 of hue
         out[i] = hsv2rgb((uint8_t)(baseHue + swing), baseSat, v);
@@ -99,17 +137,16 @@ static void fxComet(const EffectCtx &c, RGB *out, uint16_t len) {
 
     int32_t posQ8  = (int32_t)((uint64_t)(c.now % cycleMs) * rate * 256ULL / 1000ULL);
     int32_t tailQ8 = Q8(tail);
-    RGB head = tintOf(c.color, 90);
-    RGB rest = shadeOf(c.color, 225);
+    RGB head = tintOf(c.color, 70);
 
     for (uint16_t i = 0; i < len; i++) {
         int32_t d = posQ8 - (Q8(i) + 128);
         if (d >= 0 && d < tailQ8) {
             uint8_t b = 255 - (uint8_t)((255L * d) / tailQ8);
-            b = scale8(b, b);
-            out[i] = blendColor(rest, head, b);
+            b = scale8(b, b);                        // squared falloff
+            out[i] = scaleColorVideo(head, b);       // tail fades out to black
         } else {
-            out[i] = rest;
+            out[i] = RGB_BLACK;                      // everything else is off
         }
     }
 }

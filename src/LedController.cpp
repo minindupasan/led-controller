@@ -95,8 +95,10 @@ void LedController::renderFrame(uint32_t now) {
     fillSolid(_leds, _activeCount, RGB_BLACK);
     if (!st.power) return;
 
-    /* The opener sweeps INNOV and IOT as one continuous run, so the words
-       need to know where they sit in the combined chain. */
+    /* INNOV and IOT are always treated as one continuous run, so a band that
+       leaves the V carries straight on into the I of IOT instead of each word
+       restarting its own copy of the animation. Each word keeps its own
+       colour, so the light changes hue as it crosses the seam. */
     uint16_t chainTotal = 0;
     for (uint8_t w = 0; w < TheSign.wordCount(); w++) chainTotal += TheSign.wordLength(w);
     uint16_t chainAt = 0;
@@ -109,17 +111,15 @@ void LedController::renderFrame(uint32_t now) {
 
         uint8_t anim = wd->animation;
         uint8_t fade = 255;
-        bool    driven = TheShow.override(w, anim, fade);
+        TheShow.override(w, anim, fade);
 
         EffectCtx ctx {
             .now   = now,
             .speed = st.speed,
             .color = wd->color,
             .fade  = fade,
-            /* chained only while the show drives; otherwise each word
-               animates within itself */
-            .chainOffset = driven ? chainAt : (uint16_t)0,
-            .chainTotal  = driven ? chainTotal : len
+            .chainOffset = chainAt,
+            .chainTotal  = chainTotal
         };
 
         Effects::render(anim, ctx, _scratch, len);
