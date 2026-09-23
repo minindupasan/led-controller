@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# flash - build and upload one of the two firmwares.
+#
+#   ./flash letters     ESP #1  INNOV IOT letters on D13   (env: sign)
+#   ./flash lamp        ESP #2  oil lamp on D27            (env: lamp)
+#
+# The port is found automatically. Pass one explicitly if both boards are
+# plugged in at once:
+#
+#   ./flash lamp /dev/cu.usbserial-0002
+#
+set -e
+
+PIO="$HOME/.platformio/penv/bin/pio"
+TARGET="${1:-}"
+PORT="${2:-}"
+
+case "$TARGET" in
+  letters|sign|innoviot) ENV=sign; WHAT="INNOV IOT letters (D13)" ;;
+  lamp|logo|oil)         ENV=lamp; WHAT="oil lamp (D27)" ;;
+  *)
+    echo "usage: ./flash letters|lamp [port]"
+    echo
+    echo "  letters   ESP #1 - INNOV IOT letters on D13, joins the lamp's wi-fi"
+    echo "  lamp      ESP #2 - oil lamp on D27, hosts the wi-fi and the RFID"
+    exit 1 ;;
+esac
+
+# --- find the board -------------------------------------------------------
+if [ -z "$PORT" ]; then
+  PORTS=$(ls /dev/cu.usbserial* /dev/cu.usbmodem* /dev/cu.wchusbserial* 2>/dev/null || true)
+  COUNT=$(printf '%s\n' "$PORTS" | grep -c . || true)
+
+  if [ "$COUNT" -eq 0 ]; then
+    echo "No ESP32 found on USB. Plug it in and try again."
+    exit 1
+  elif [ "$COUNT" -gt 1 ]; then
+    echo "More than one board is plugged in:"
+    printf '  %s\n' $PORTS
+    echo
+    echo "Say which one:  ./flash $TARGET <port>"
+    exit 1
+  fi
+  PORT=$(printf '%s\n' "$PORTS" | head -1)
+fi
+
+# --- make sure nothing else is holding it ---------------------------------
+if lsof -t "$PORT" >/dev/null 2>&1; then
+  HOLDER=$(lsof -t "$PORT" | while read -r p; do ps -p "$p" -o comm= ; done | paste -sd, -)
+  echo "$PORT is held by: $HOLDER"
+  echo "Close it (disconnect in the web console, or quit the serial monitor) and retry."
+  exit 1
+fi
+
+echo "flashing $WHAT  ->  $PORT"
+exec "$PIO" run -e "$ENV" -t upload --upload-port "$PORT"

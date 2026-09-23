@@ -1,13 +1,13 @@
 /*
  * Show.h - the opening sequence.
  *
- *   WAIT    dark, holding for the oil lamp (a separate ESP32) to finish
+ *   WAIT    dark, holding for the oil lamp (ESP #2) to fill
  *   OPENER  TRAVERSE sweeps INNOV IOT - the epic opener
  *   CALM    settles into BREATHE and stays there
  *   MANUAL  you picked something; the show stops driving
  *
- * The lamp board can later trigger this by sending `show start` over serial
- * or pulling SHOW_TRIGGER_PIN low - see armFromExternal().
+ * The lamp board triggers this by sending `show start` to this board over
+ * the AP it hosts - see NetInterface::sendToSign() on ESP #2.
  */
 #pragma once
 
@@ -44,5 +44,5 @@ extern Show TheShow;
 
 /* Timings */
 #define SHOW_WAIT_MS       1200        // dark beat before the opener
-#define SHOW_SWEEP_COUNT   2           // traverse passes in the opener
+#define SHOW_SWEEP_COUNT   1           // one traverse pass, then breathe
 #define SHOW_FADE_MS       900         // cross-fade from opener into calm

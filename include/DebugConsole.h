@@ -31,6 +31,7 @@ private:
     String cmdWord(const String &args);
     String cmdTest(const String &args);
     String cmdShow(const String &args);
+    String cmdLogo(const String &args);
     String cmdPin(const String &args);
     String cmdStatus();
     String cmdList();

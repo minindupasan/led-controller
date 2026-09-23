@@ -96,6 +96,12 @@ void Sign::loadDefaults() {
     _cfg.s.power        = true;
     _cfg.s.autoShow     = true;
 
+    _cfg.s.logoPin      = DEFAULT_LOGO_PIN;
+    _cfg.s.logoLedCount = DEFAULT_LOGO_COUNT;
+    _cfg.s.logoColor    = RGB((uint32_t)COL_AMBER);   // a lamp flame
+    _cfg.s.logoFadeMs10   = 25;                        // 250 ms per segment
+    _cfg.s.logoAutoTrigger = true;                     // full lamp starts the sign
+
     /* Measured on the real sign - see the mapping tab to re-measure. */
     struct Def { const char *n; uint16_t a, b; };
     static const Def defs[] = {
@@ -124,6 +130,170 @@ void Sign::loadDefaults() {
     _cfg.words[1].count     = 3;
     _cfg.words[1].color     = RGB((uint32_t)COL_AMBER);
 
+    /* The guests, in priority order - 1 lights first. Their LED ranges are
+       an even split until the lamp is measured with the walk tool. */
+    struct Guest { uint8_t pri; const char *card; const char *name; };
+    static const Guest guests[] = {
+        { 1, "59A52A8E", "Anuradha Jaykody"},
+        { 2, "54422B8E", "Nuwan Kodagoda"},
+        { 3, "F492298E", "Koliya Pulasinghe"},
+        { 4, "0294298E", "Samantha Rajapaksha"},
+        { 5, "85CE298E", "Amila Senarathne"},
+        { 6, "5B674000", "Uditha Dharmakeerthi"},
+        { 7, "213B3F00", "Namal Cooray"},
+        { 8, "4716298E", "Gayan Dissanayake"},
+        { 9, "9E12298E", "Chanaka Prasad"},
+        {10, "F6E62A8E", "Thejan Mendis"},
+        {11, "E7242A8E", "Kasuni Navodana"},
+        {12, "5461298E", "Dinith Primal"},
+        {13, "191B4900", "Student Committee President"},
+        {14, "B4914000", "Extra card 1"},
+        {15, "FAD0D505", "Extra card 2"},
+    };
+    _cfg.logoSegCount = sizeof(guests) / sizeof(guests[0]);
+    for (uint8_t i = 0; i < _cfg.logoSegCount; i++) {
+        LogoSegment &l = _cfg.logoSegs[i];
+        ::memset(&l, 0, sizeof(l));
+        ::strncpy(l.name, guests[i].name, GUEST_NAME_LEN - 1);
+        ::strncpy(l.card, guests[i].card, CARD_ID_LEN - 1);
+        l.priority = guests[i].pri;
+        l.enabled  = true;
+        l.reversed = false;
+    }
+    spreadLogoEvenly();
+
+    _dirty = true;
+}
+
+/* ------------------------------------------------------------------- logo */
+LogoSegment *Sign::logoSeg(int i) {
+    return (i < 0 || i >= _cfg.logoSegCount) ? nullptr : &_cfg.logoSegs[i];
+}
+
+/* Card lookup is the hot path: every tap arrives as an HTTP request and has
+   to resolve to a segment. Comparison is case-insensitive so it does not
+   matter how the reader formats the UID. */
+int Sign::logoSegByCard(const String &uid) const {
+    String want = uid;
+    want.trim();
+    want.toUpperCase();
+    if (!want.length()) return -1;
+    for (uint8_t i = 0; i < _cfg.logoSegCount; i++)
+        if (want.equalsIgnoreCase(_cfg.logoSegs[i].card)) return i;
+    return -1;
+}
+
+int Sign::addLogoSeg(const String &name, uint16_t start, uint16_t end) {
+    if (_cfg.logoSegCount >= MAX_LOGO_SEGS) return -1;
+    LogoSegment &l = _cfg.logoSegs[_cfg.logoSegCount];
+    ::memset(&l, 0, sizeof(l));
+    ::strncpy(l.name, name.length() ? name.c_str()
+                                    : (String("Guest ") + (_cfg.logoSegCount + 1)).c_str(),
+              GUEST_NAME_LEN - 1);
+    l.priority = _cfg.logoSegCount + 1;
+    if (end < start) { uint16_t t = start; start = end; end = t; }
+    l.start    = start;
+    l.end      = end;
+    l.enabled  = true;
+    l.reversed = false;
+    l.card[0]  = 0;
+    _dirty = true;
+    return _cfg.logoSegCount++;
+}
+
+bool Sign::removeLogoSeg(int i) {
+    if (i < 0 || i >= _cfg.logoSegCount) return false;
+    for (int k = i; k < _cfg.logoSegCount - 1; k++)
+        _cfg.logoSegs[k] = _cfg.logoSegs[k + 1];
+    _cfg.logoSegCount--;
+    _dirty = true;
+    return true;
+}
+
+bool Sign::assignCard(int i, const String &uid) {
+    LogoSegment *l = logoSeg(i);
+    if (!l) return false;
+    String v = uid;
+    v.trim();
+    v.toUpperCase();
+    ::memset(l->card, 0, CARD_ID_LEN);
+    if (v.length()) ::strncpy(l->card, v.c_str(), CARD_ID_LEN - 1);
+    _dirty = true;
+    return true;
+}
+
+int Sign::logoSegByName(const String &name) const {
+    for (uint8_t i = 0; i < _cfg.logoSegCount; i++)
+        if (name.equalsIgnoreCase(_cfg.logoSegs[i].name)) return i;
+    return -1;
+}
+
+bool Sign::setLogoRange(int i, uint16_t start, uint16_t end) {
+    LogoSegment *l = logoSeg(i);
+    if (!l) return false;
+    if (end < start) { uint16_t t = start; start = end; end = t; }
+    l->start = start;
+    l->end   = min<uint16_t>(end, MAX_LOGO_LEDS - 1);
+    _dirty = true;
+    return true;
+}
+
+bool Sign::setLogoSegCount(uint8_t n) {
+    _cfg.logoSegCount = constrain((int)n, 1, MAX_LOGO_SEGS);
+    spreadLogoEvenly();
+    return true;
+}
+
+/* Divide the logo strip evenly between its segments, naming them L1..Ln.
+   The starting point before the real boundaries are measured. */
+bool Sign::setLogoName(int i, const String &name) {
+    LogoSegment *l = logoSeg(i);
+    if (!l || !name.length()) return false;
+    ::memset(l->name, 0, GUEST_NAME_LEN);
+    ::strncpy(l->name, name.c_str(), GUEST_NAME_LEN - 1);
+    _dirty = true;
+    return true;
+}
+
+bool Sign::setLogoPriority(int i, uint8_t priority) {
+    LogoSegment *l = logoSeg(i);
+    if (!l) return false;
+    l->priority = priority;
+    _dirty = true;
+    return true;
+}
+
+/* Keep the table in the order the lamp fills. Insertion sort - the list is
+   short and this runs only when a priority is edited. */
+void Sign::sortLogoByPriority() {
+    for (int i = 1; i < _cfg.logoSegCount; i++) {
+        LogoSegment key = _cfg.logoSegs[i];
+        int j = i - 1;
+        while (j >= 0 && _cfg.logoSegs[j].priority > key.priority) {
+            _cfg.logoSegs[j + 1] = _cfg.logoSegs[j];
+            j--;
+        }
+        _cfg.logoSegs[j + 1] = key;
+    }
+    _dirty = true;
+}
+
+void Sign::spreadLogoEvenly() {
+    uint8_t n = _cfg.logoSegCount ? _cfg.logoSegCount : 1;
+    uint16_t each = _cfg.s.logoLedCount / n;
+    uint16_t rem  = _cfg.s.logoLedCount % n;
+    uint16_t cursor = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        LogoSegment &l = _cfg.logoSegs[i];
+        /* names, cards and priorities survive - this only moves the ranges */
+        uint16_t len = each + (i < rem ? 1 : 0);
+        l.start    = cursor;
+        l.end      = cursor + len - 1;
+        l.enabled  = true;
+        l.reversed = false;
+        /* keep any card already assigned - re-splitting is a geometry change */
+        cursor += len;
+    }
     _dirty = true;
 }
 
@@ -136,7 +306,8 @@ bool Sign::load() {
         SignConfig tmp{};
         prefs.getBytes(NVS_KEY, &tmp, sizeof(tmp));
         if (tmp.version == CONFIG_VERSION &&
-            tmp.letterCount <= MAX_LETTERS && tmp.wordCount <= MAX_WORDS) {
+            tmp.letterCount <= MAX_LETTERS && tmp.wordCount <= MAX_WORDS &&
+            tmp.logoSegCount <= MAX_LOGO_SEGS) {
             _cfg = tmp;
             ok = true;
         }
@@ -245,6 +416,11 @@ void Sign::toJson(JsonObject root) const {
     s["autoShow"]     = _cfg.s.autoShow;
     s["anim"]         = _cfg.s.animation;
     s["animName"]     = animationName(_cfg.s.animation);
+    s["logoPin"]      = _cfg.s.logoPin;
+    s["logoLedCount"] = _cfg.s.logoLedCount;
+    s["logoColor"]    = hex(_cfg.s.logoColor);
+    s["logoFadeMs"]     = _cfg.s.logoFadeMs10 * 10;
+    s["logoAutoTrigger"] = _cfg.s.logoAutoTrigger;
 
     JsonArray words = root["words"].to<JsonArray>();
     for (uint8_t i = 0; i < _cfg.wordCount; i++) {
@@ -275,6 +451,21 @@ void Sign::toJson(JsonObject root) const {
             if (i >= _cfg.words[w].first && i < _cfg.words[w].first + _cfg.words[w].count)
                 owner = w;
         o["word"] = owner;
+    }
+
+    JsonArray logo = root["logo"].to<JsonArray>();
+    for (uint8_t i = 0; i < _cfg.logoSegCount; i++) {
+        const LogoSegment &l = _cfg.logoSegs[i];
+        JsonObject o = logo.add<JsonObject>();
+        o["i"]        = i;
+        o["name"]     = l.name;
+        o["start"]    = l.start;
+        o["end"]      = l.end;
+        o["len"]      = l.length();
+        o["enabled"]  = l.enabled;
+        o["reversed"] = l.reversed;
+        o["card"]     = l.card;
+        o["priority"] = l.priority;
     }
 
     JsonArray anims = root["animations"].to<JsonArray>();

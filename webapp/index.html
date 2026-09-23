@@ -144,6 +144,7 @@ hr{border:none;border-top:1px solid var(--line);margin:14px 0}
       <button id="btnPower" class="primary grow">POWER</button>
       <button class="primary" onclick="send('show start',true)">▶ START SHOW</button>
       <span class="chip">stage: <b id="showStage">--</b></span>
+      <label><input type="checkbox" id="gAuto"> run on boot</label>
     </div>
     <div class="row"><label class="lbl">Brightness</label>
       <input type="range" id="gBright" min="0" max="255"><span class="val" id="vBright">-</span></div>
@@ -239,18 +240,103 @@ hr{border:none;border-top:1px solid var(--line);margin:14px 0}
 <!-- ============================== LOGO ============================= -->
 <section id="logo">
   <div class="panel">
-    <h2>Oil lamp</h2>
-    <p class="hint" style="font-size:12px">
-      The lamp runs on its own ESP32 with its own LEDs, so it is not controlled from here.<br><br>
-      In the show it lights first; once it is fully lit, this board runs the TRAVERSE opener
-      across INNOV IOT and then settles into BREATHE.<br><br>
-      The lamp board can trigger that automatically by sending <b>show start</b> over serial
-      to this board — the firmware already accepts it. Its own controls will live on this tab.
-    </p>
+    <h2>Oil lamp — level</h2>
+    <div class="bar" id="logoBar"></div>
     <div class="row">
-      <button onclick="send('show start',true)">▶ TRIGGER OPENER NOW</button>
-      <button class="sm" onclick="send('show stop',true)">STOP SHOW</button>
-      <label><input type="checkbox" id="gAuto"> run the show on boot</label>
+      <button class="sm" onclick="send('logo down',true)">&#8722; ONE</button>
+      <input type="range" id="logoLevel" min="0" max="20" style="flex:1">
+      <button class="sm" onclick="send('logo up',true)">PLUS ONE</button>
+      <span class="chip">lit <b id="logoLvl">0</b> / <span id="logoMax">0</span></span>
+      <span class="chip">last card <b id="lastCard">—</b></span>
+    </div>
+    <div class="row">
+      <button onclick="send('logo all',true)">FILL</button>
+      <button onclick="send('logo off',true)">EMPTY</button>
+      <label><input type="checkbox" id="logoGlow"
+             onchange="send('logo glow '+(this.checked?'on':'off'))"> glow when full</label>
+      <span class="grow"></span>
+      <label class="lbl">Colour</label>
+      <button class="sm" onclick="send('logo color amber',true)">AMBER</button>
+      <button class="sm" onclick="send('logo color purple',true)">PURPLE</button>
+      <input type="color" id="logoColor" onchange="send('logo color '+this.value,true)">
+    </div>
+    <p class="hint">Segments light in order, so the lamp fills from the bottom.
+       The newest one eases in over the fade time rather than snapping on.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Driving it from an Arduino</h2>
+    <p class="hint" style="font-size:12px">
+      Join the sign's AP (<b>INNOV-IOT-SIGN</b> / <b>innoviot123</b>) and raise the level
+      with a plain HTTP GET — no websocket, no library:
+      <br><br>
+      <code style="color:#fff">http://192.168.4.1/api/cmd?c=logo+level+7</code><br>
+      <code style="color:#fff">http://192.168.4.1/api/cmd?c=logo+up</code><br>
+      <code style="color:#fff">http://192.168.4.1/api/cmd?c=logo+all</code>
+      <br><br>
+      When the level reaches the last segment the lamp is full — that is the cue to
+      trigger the sign with <code style="color:#fff">?c=show+start</code>.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>Guests — one segment each</h2>
+    <div class="row">
+      <label class="lbl">Segments</label>
+      <input type="number" id="logoSegs" min="1" max="24">
+      <button class="sm" onclick="send('logo segs '+logoSegs.value,true)">SET &amp; SPLIT EVENLY</button>
+      <button class="sm" onclick="send('logo spread',true)">RE-SPLIT</button>
+      <span class="grow"></span>
+      <label class="lbl">LED count</label>
+      <input type="number" id="logoLeds" min="1" max="600">
+      <button class="sm" onclick="send('logo leds '+logoLeds.value,true)">APPLY</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Pri</th><th>Name</th><th>RFID card</th>
+                   <th>Start</th><th>End</th><th>Len</th><th>Lit</th><th></th></tr></thead>
+        <tbody id="logoBody"></tbody>
+      </table>
+    </div>
+    <hr>
+    <div class="row">
+      <input type="text" id="nLogoName" placeholder="guest name" size="18">
+      <input type="number" id="nLogoA" placeholder="start">
+      <input type="number" id="nLogoB" placeholder="end">
+      <button onclick="addLogoSeg()">ADD GUEST</button>
+      <button class="sm" onclick="send('logo sort',true)">SORT BY PRIORITY</button>
+      <span class="grow"></span>
+      <button class="sm" onclick="send('logo reset',true)">RESET LAMP</button>
+      <label><input type="checkbox" id="logoAuto"
+             onchange="send('logo autotrigger '+(this.checked?'on':'off'))">
+             full lamp starts the sign</label>
+    </div>
+    <p class="hint" id="learnHint">Press <b>LEARN</b> on a row, then tap that card on the
+       reader — the UID is captured and saved automatically, so you never type one in.
+       Priority is the fill order: 1 lights first. All fifteen guests are preloaded with
+       their cards.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Mapping the lamp</h2>
+    <div class="row">
+      <button onclick="send('logo test walk '+lwDelay.value)">START WALK</button>
+      <label class="lbl">Step ms</label><input type="number" id="lwDelay" value="400">
+      <button onclick="send('logo test off')">STOP</button>
+      <span class="hint">walk index: <b id="logoWalk">-</b></span>
+    </div>
+    <div class="row">
+      <label class="lbl">Range</label>
+      <input type="number" id="lrA" value="0"><span>to</span><input type="number" id="lrB" value="9">
+      <button onclick="send('logo test range '+lrA.value+' '+lrB.value)">LIGHT</button>
+      <span class="grow"></span>
+      <label class="lbl">Data pin</label><select id="logoPin"></select>
+      <button class="sm" onclick="send('logo pin '+logoPin.value,true)">MOVE</button>
+    </div>
+    <div class="row">
+      <label class="lbl">Fade / level</label>
+      <input type="number" id="logoFade" min="40" max="2000" step="10">
+      <button class="sm" onclick="send('logo fade '+logoFade.value,true)">APPLY ms</button>
     </div>
   </div>
 </section>
@@ -310,7 +396,7 @@ const $ = id => document.getElementById(id);
 const BAUD = 115200;
 let TX = null, port, writer, reader, keepReading = false, pollTimer = null;
 let S = {settings:{}, words:[], letters:[], animations:[], issues:[]};
-let hist = [], histIx = 0;
+let hist = [], histIx = 0, lastLevel = 0, lastLearn = -1, lastLit = {};
 
 const PALETTE = [['purple','#7B2FF7'],['cyan','#00E5FF'],['amber','#FFB020']];
 
@@ -438,6 +524,34 @@ function status(m){
   $('cShow').textContent = 'show '+m.show;
   $('showStage').textContent = m.show;
   $('walkIdx').textContent = m.testIndex;
+  if(m.logoLearn !== undefined && m.logoLearn !== lastLearn){
+    lastLearn = m.logoLearn;
+    $('learnHint').innerHTML = lastLearn >= 0
+      ? '<b style="color:#fff">Waiting for a card — tap it on the reader now.</b>'
+      : 'Press <b>LEARN</b> on a row, then tap that card on the reader — the UID is '+
+        'captured and saved automatically, so you never type one in.';
+    renderLogo();
+  }
+  if(m.lastCard) $('lastCard').textContent = m.lastCard;
+  if(m.logoLit !== undefined){
+    lastLit = {};
+    for(let i=0;i<24;i++) if(m.logoLit & (1<<i)) lastLit[i] = true;
+    /* update the dots in place - rebuilding the rows would clobber whatever
+       field someone is typing a card ID into */
+    (S.logo||[]).forEach(l=>{
+      const cell = $('lit'+l.i);
+      if(cell){ cell.textContent = lastLit[l.i]?'●':'○';
+                cell.style.color = lastLit[l.i]?'#fff':'#444'; }
+    });
+  }
+  if(m.logoLevel !== undefined){
+    lastLevel = m.logoLevel;
+    $('logoLvl').textContent = m.logoLevel;
+    $('logoMax').textContent = m.logoSegs;
+    if(document.activeElement !== $('logoLevel')) $('logoLevel').value = m.logoLevel;
+    $('logoWalk').textContent = m.logoIndex;
+    drawLogoBar();
+  }
   const testing = m.testMode && m.testMode !== 'none';
   $('testBanner').style.display = testing ? '' : 'none';
   $('testBanner').textContent = 'TEST OVERLAY ('+m.testMode+') — CLEAR';
@@ -445,7 +559,9 @@ function status(m){
   $('tele').innerHTML = [
     ['fps',m.fps],['frames',m.frames],['current',m.ma+' mA'],['heap',(m.heap/1024|0)+' kB'],
     ['uptime',fmt(m.uptime)],['leds',m.leds],['data pin','GPIO'+m.pin],['show',m.show],
-    ['power',m.power?'ON':'OFF'],['test',m.testMode],['unsaved',m.dirty?'YES':'no']
+    ['power',m.power?'ON':'OFF'],['test',m.testMode],
+    ['logo level',(m.logoLevel||0)+' / '+(m.logoSegs||0)+(m.logoFull?' FULL':'')],
+    ['unsaved',m.dirty?'YES':'no']
   ].map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('');
 }
 
@@ -518,6 +634,57 @@ function render(){
     `<option value="${l.i}">${l.i} — ${l.name} (${l.start}-${l.end})</option>`).join('');
   if(keep) $('mSeg').value = keep;
   syncMap();
+  renderLogo();
+  drawLogoBar();
+}
+
+function renderLogo(){
+  const st = S.settings||{}, segs = S.logo||[];
+  $('logoSegs').value = segs.length;
+  $('logoLeds').value = st.logoLedCount;
+  $('logoFade').value = st.logoFadeMs;
+  $('logoColor').value = st.logoColor || '#FFB020';
+  $('logoLevel').max = segs.length;
+  $('logoMax').textContent = segs.length;
+
+  const PINS=[2,4,5,12,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33];
+  $('logoPin').innerHTML = PINS.map(p=>
+    `<option value="${p}" ${p===st.logoPin?'selected':''}>GPIO${p}</option>`).join('');
+
+  $('logoAuto').checked = !!st.logoAutoTrigger;
+  $('logoBody').innerHTML = segs.map(l=>`
+    <tr class="${l.enabled?'':'off'}">
+      <td><input type="number" value="${l.priority}" min="1" max="99" style="width:48px"
+                 title="fill order — 1 lights first"
+                 onchange="send('logo priority ${l.i} '+this.value,true)"></td>
+      <td><input type="text" value="${l.name}" style="width:180px"
+                 onchange="send('logo name ${l.i} '+this.value,true)"></td>
+      <td>
+        <input type="text" value="${l.card||''}" placeholder="tap to learn" style="width:96px"
+               onchange="send('logo '+(this.value?'assign ${l.i} '+this.value:'unassign ${l.i}'),true)">
+        <button class="sm" style="${lastLearn==l.i?'background:#fff;color:#000':''}"
+                onclick="send('logo learn ${l.i}')">${lastLearn==l.i?'TAP NOW':'LEARN'}</button>
+      </td>
+      <td><input type="number" value="${l.start}" style="width:64px"
+                 onchange="send('logo range ${l.i} '+this.value+' ${l.end}',true)"></td>
+      <td><input type="number" value="${l.end}" style="width:64px"
+                 onchange="send('logo range ${l.i} ${l.start} '+this.value,true)"></td>
+      <td>${l.len}</td>
+      <td id="lit${l.i}" style="color:${lastLit[l.i]?'#fff':'#444'}">${lastLit[l.i]?'●':'○'}</td>
+      <td><button class="sm" onclick="send('logo id ${l.i}')">BLINK</button>
+          <button class="sm" onclick="delLogoSeg(${l.i})">DEL</button></td>
+    </tr>`).join('');
+}
+
+function drawLogoBar(){
+  const segs = S.logo||[], col = (S.settings||{}).logoColor || '#FFB020';
+  $('logoBar').innerHTML = segs.map(l=>{
+    const on = !!lastLit[l.i];
+    return `<div style="flex:${Math.max(1,l.len)};background:${on ? col : '#141414'};
+             color:${on ? '#000' : '#444'}"
+             title="${l.priority}. ${l.name}  (${l.start}-${l.end})${l.card?' · '+l.card:''}"
+             onclick="send('logo level ${l.i+1}',true)">${l.priority}</div>`;
+  }).join('');
 }
 
 function syncMap(){
@@ -534,6 +701,9 @@ $('btnSave').onclick       = () => send('save').then(()=>toast('saved to flash')
 $('btnPower').onclick      = () => send(S.settings.power?'off':'on', true);
 $('mSeg').onchange         = syncMap;
 $('gAuto').onchange        = e => send('show auto '+(e.target.checked?'on':'off'));
+$('logoLevel').addEventListener('change', e => send('logo level '+e.target.value, true));
+$('logoLevel').addEventListener('input',  e => { $('logoLvl').textContent = e.target.value;
+                                                 });
 
 [['gBright','bright','vBright'],['gSpeed','speed','vSpeed']].forEach(([id,cmd,out])=>{
   let last = 0;

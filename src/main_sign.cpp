@@ -1,17 +1,21 @@
 /*
  * ============================================================================
- *  INNOV IOT LED SIGN
+ *  INNOV IOT LED SIGN  -  ESP #1
  *  ESP32 + WS2812B, 591 LEDs on GPIO13, driven through NeoPixelBus/RMT.
  *
  *  Letters carry geometry; words (INNOV, IOT) carry colour and animation.
  *  The show runs: wait -> TRAVERSE opener -> calm BREATHE, and any manual
  *  change hands control back to you.
  *
- *  One line protocol, two transports:
- *    Wi-Fi  the board hosts AP "INNOV-IOT-SIGN" and serves the UI itself
- *           at http://192.168.4.1 (also http://innoviot.local)
- *    Serial the same commands over USB @115200
- *  Replies prefixed "#J" are JSON for the UI; everything else is for a human.
+ *  Drives the letters only. The oil lamp is ESP #2, a separate board with
+ *  its own firmware (env:lamp) - it hosts the Wi-Fi and owns the RFID.
+ *
+ *  This board joins that network as 192.168.4.2 and waits. When the last
+ *  guest taps their card, the lamp sends `show start` here and the sign runs
+ *  TRAVERSE once, then settles into BREATHE.
+ *
+ *  Control: http://192.168.4.2 (or http://sign.local) on the lamp's network,
+ *  or the same commands over USB serial @115200.
  *
  *  The oil-lamp logo runs on a separate ESP32; it can trigger the opener
  *  here by sending `show start`.
@@ -35,7 +39,7 @@ void setup() {
     Log.begin(115200);
     pinMode(STATUS_LED_PIN, OUTPUT);
 
-    Log.log("=== INNOV IOT LED CONSOLE ===");
+    Log.log("=== INNOV IOT SIGN (ESP #1) ===");
     Log.log("[sys] chip %s, %u MHz, flash %u MB",
             ESP.getChipModel(), ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / (1024 * 1024));
 
@@ -45,8 +49,9 @@ void setup() {
     TheShow.begin();
     Console.begin();
 
-    Log.log("[sys] ready: %u letters, %u words, %u leds",
-            TheSign.letterCount(), TheSign.wordCount(), TheSign.settings().ledCount);
+    Log.log("[sys] ready: %u letters, %u words, %u leds on GPIO%u",
+            TheSign.letterCount(), TheSign.wordCount(),
+            TheSign.settings().ledCount, Leds.activePin());
     Console.emitHello();
     Serial.print(F("sign> "));
 }

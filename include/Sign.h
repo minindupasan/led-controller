@@ -30,6 +30,21 @@ public:
     int      wordByName(const String &name) const;   // "all" handled by caller
     uint16_t wordLength(int w) const;                // total lit pixels
 
+    /* logo segments ---------------------------------------------------- */
+    uint8_t      logoSegCount() const { return _cfg.logoSegCount; }
+    LogoSegment *logoSeg(int i);
+    int          logoSegByName(const String &name) const;
+    int          logoSegByCard(const String &uid) const;   // -1 = unknown card
+    bool         setLogoRange(int i, uint16_t start, uint16_t end);
+    bool         setLogoSegCount(uint8_t n);               // re-splits evenly
+    void         spreadLogoEvenly();
+    int          addLogoSeg(const String &name, uint16_t start, uint16_t end);
+    bool         removeLogoSeg(int i);
+    bool         assignCard(int i, const String &uid);     // "" clears it
+    bool         setLogoName(int i, const String &name);
+    bool         setLogoPriority(int i, uint8_t priority);
+    void         sortLogoByPriority();
+
     /* validation ------------------------------------------------------- */
     struct Issue { int a; int b; const char *what; };
     uint8_t validate(Issue *out, uint8_t max) const;
